@@ -21,6 +21,7 @@ import {
 import { ReactNode, useState } from 'react';
 import { signOutAction } from '@/app/actions/auth';
 import { LiveRefresh } from '@/components/live-refresh';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 const nav = [
   { href: '/dashboard', label: 'Dashboard', icon: Gauge },
@@ -54,12 +55,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[250px_1fr]">
       <LiveRefresh enabled={!mock} />
-      <aside className={`${mobileOpen ? 'block' : 'hidden'} fixed inset-y-0 left-0 z-40 w-[250px] border-r border-slate-200 bg-white p-4 lg:static lg:block lg:w-auto`}>
+      <aside className={`${mobileOpen ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 h-screen w-[250px] flex-col border-r border-slate-200 bg-white p-4 lg:sticky lg:top-0 lg:flex lg:w-auto`}>
         <div className="flex items-center gap-3 px-2 py-2">
           <BrandMark />
           <div>
             <div className="font-bold leading-tight text-slate-900">Yogakulam</div>
-            <div className="text-xs font-medium text-slate-400">Growth CRM · v0.6</div>
+            <div className="text-xs font-medium text-slate-400">Growth CRM · v0.7</div>
           </div>
         </div>
 
@@ -68,7 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <p className={`mt-1.5 text-xs leading-5 ${mock ? 'text-orange-700/75' : 'text-emerald-700/75'}`}>{mock ? 'Using fictional CRM data until Supabase is connected.' : 'Authenticated CRM data is persistent and live-synced.'}</p>
         </div>
 
-        <nav className="mt-5 space-y-1">
+        <nav className="mt-5 min-h-0 flex-1 space-y-1 overflow-y-auto pb-2">
           {nav.map((item) => {
             const Icon = item.icon;
             const active = pathname.startsWith(item.href);
@@ -86,7 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-slate-200 p-3">
+        <div className="mt-4 shrink-0 rounded-2xl border border-slate-200 bg-white p-3">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">AD</div>
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold text-slate-800">CRM User</div><div className="text-xs text-slate-400">{mock ? 'Development access' : 'Authenticated'}</div></div>
@@ -107,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <input name="q" className="w-full bg-transparent px-2 py-2.5 text-sm outline-none placeholder:text-slate-400" placeholder="Search lead, course or country…" />
             <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-400">Enter</kbd>
           </form>
+          <ThemeToggle />
           <button className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 hover:bg-slate-50" aria-label="Notifications"><Bell size={18} /></button>
           <Link href="/leads/new" className="btn-primary hidden sm:inline-flex"><ContactRound size={16} /> Add lead</Link>
         </header>

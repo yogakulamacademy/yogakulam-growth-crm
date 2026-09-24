@@ -1,5 +1,6 @@
 import { Activity, CheckCircle2, Cookie, Fingerprint, MousePointerClick, ShieldCheck, Tags, UserPlus, ExternalLink } from 'lucide-react';
 import { PageHeader, StatCard } from '@/components/ui';
+import { TrackerSnippet } from '@/components/tracker-snippet';
 import { getTrackingHealth, getWebsiteCaptureHealth, getWebFunnel7d, isMockMode } from '@/lib/data';
 
 export default async function TrackingPage() {
@@ -29,8 +30,8 @@ export default async function TrackingPage() {
       <div className="card-pad">
         <div className="eyebrow">Website installation</div>
         <div className="section-title mt-1">Tracker snippet</div>
-        <p className="mt-2 text-sm leading-6 text-slate-500">Host the CRM, then add this script to Yogakulam pages directly or through Google Tag Manager. Replace the CRM domain with the actual deployment URL.</p>
-        <pre className="mt-5 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100"><code>{`<script\n  src="https://crm.yourdomain.com/yogakulam-tracker.js"\n  data-endpoint="https://crm.yourdomain.com/api/tracking/collect"\n  data-site="yogakulamacademy.com"\n  data-consent-mode="required"\n  defer>\n</script>`}</code></pre>
+        <p className="mt-2 text-sm leading-6 text-slate-500">Add this script to Yogakulam pages directly or through Google Tag Manager. The snippet automatically uses the CRM domain you are currently viewing.</p>
+        <TrackerSnippet />
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <Mini icon={<Cookie size={16}/>} title="First touch" text="Preserved locally instead of being overwritten by later visits."/>
           <Mini icon={<MousePointerClick size={16}/>} title="Click IDs" text="Captures GCLID, GBRAID, WBRAID and FBCLID when present."/>
