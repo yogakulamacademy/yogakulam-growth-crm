@@ -1,0 +1,18 @@
+import { CheckCircle2, CircleDashed, Database, Instagram, KeyRound, MessageCircle, Tags, Webhook } from 'lucide-react';
+import { PageHeader } from '@/components/ui';
+import { getSupabasePublicConfig, useMockData } from '@/lib/config';
+
+export default function SettingsPage(){
+  const { configured } = getSupabasePublicConfig();
+  const live = !useMockData && configured;
+  return <>
+    <PageHeader eyebrow="Configuration" title="Settings & integrations" description="CRM persistence, authentication and the first-party website tracking layer are implemented. Messaging integrations remain the next milestone."/>
+    <div className="grid gap-4 xl:grid-cols-2">
+      <div className="card-pad"><div className="eyebrow">Core</div><div className="section-title mt-1">Environment</div><div className="mt-5 space-y-3"><Integration icon={<Database size={18}/>} name="Supabase" status={live ? 'Live' : configured ? 'Configured · mock mode' : 'Needs environment values'} ready={live} detail="PostgreSQL CRM, RLS and persistent mutations"/><Integration icon={<KeyRound size={18}/>} name="Supabase Auth" status={live ? 'Login enforced' : 'Bypassed in mock mode'} ready={live} detail="Cookie-based server-side sessions"/><Integration icon={<Tags size={18}/>} name="Mock dataset" status={useMockData ? 'Active' : 'Disabled'} ready={useMockData} detail="Safe fictional records for UI testing"/><Integration icon={<Webhook size={18}/>} name="Website tracking API" status="Implemented" ready={true} detail="UTMs, click IDs, sessions and tagged website events"/></div></div>
+      <div className="card-pad"><div className="eyebrow">Channels</div><div className="section-title mt-1">Messaging</div><div className="mt-5 space-y-3"><Integration icon={<Instagram size={18}/>} name="Instagram Messaging API" status="Future milestone" ready={false} detail="Inbound DMs + outbound replies"/><Integration icon={<MessageCircle size={18}/>} name="WhatsApp Cloud API" status="Future milestone" ready={false} detail="Inbound messages, templates and delivery status"/></div></div>
+    </div>
+    <div className="mt-4 card-pad"><div className="eyebrow">Security</div><div className="section-title mt-1">Implementation rules</div><div className="mt-4 grid gap-3 md:grid-cols-3"><Rule title="No privileged key in browser" text="Only the browser-safe Supabase publishable/anon key is exposed. Service-role credentials stay out of the frontend."/><Rule title="RLS + explicit grants" text="Anonymous access is revoked for CRM tables. Authenticated users still pass database RLS policies."/><Rule title="Audited stage updates" text="set_lead_stage() changes the stage and writes lead_stage_history in one operation."/></div></div>
+  </>;
+}
+function Integration({icon,name,status,ready,detail}:{icon:React.ReactNode;name:string;status:string;ready:boolean;detail:string}){return <div className="flex items-center gap-3 rounded-xl border border-slate-200 p-4"><div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-brand">{icon}</div><div className="min-w-0 flex-1"><div className="font-semibold text-slate-800">{name}</div><div className="mt-0.5 text-xs text-slate-400">{detail}</div></div><div className={`flex items-center gap-1.5 text-xs font-semibold ${ready?'text-emerald-600':'text-slate-400'}`}>{ready?<CheckCircle2 size={15}/>:<CircleDashed size={15}/>} {status}</div></div>}
+function Rule({title,text}:{title:string;text:string}){return <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm font-bold text-slate-800">{title}</div><p className="mt-1.5 text-xs leading-5 text-slate-500">{text}</p></div>}

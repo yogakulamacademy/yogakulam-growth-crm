@@ -1,0 +1,13 @@
+import { PageHeader, ProgressBar } from '@/components/ui';
+import { mockCampaigns } from '@/lib/mock-data';
+import { formatCompactINR } from '@/lib/format';
+
+const objections = [
+  ['Price / budget', 31], ['Schedule / dates', 24], ['Flights / travel planning', 17], ['Certification questions', 12], ['Accommodation', 9], ['Other', 7]
+] as const;
+
+export default function AnalyticsPage(){
+  const best = [...mockCampaigns].sort((a,b)=>(b.enrolled/b.leads)-(a.enrolled/a.leads));
+  return <><PageHeader eyebrow="Performance intelligence" title="Analytics" description="The reporting layer will combine CRM outcomes, response performance, acquisition efficiency and revenue." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Kpi label="Lead → qualified" value="25.1%" note="+2.4 pts vs last month"/><Kpi label="Lead → enrolled" value="4.1%" note="86 enrollments / 2,086 leads"/><Kpi label="Median first response" value="3m 42s" note="Instagram + WhatsApp"/><Kpi label="Attributed revenue" value="₹77.1L" note="Paid campaigns + CRM"/></div><div className="mt-4 grid gap-4 xl:grid-cols-2"><div className="card-pad"><div className="eyebrow">Sales intelligence</div><div className="section-title mt-1">Top lead objections</div><div className="mt-5 space-y-4">{objections.map(([name,val])=><div key={name}><div className="mb-2 flex justify-between text-sm"><span className="font-medium text-slate-700">{name}</span><span className="font-bold text-slate-900">{val}%</span></div><ProgressBar value={val} max={35}/></div>)}</div></div><div className="card-pad"><div className="eyebrow">Campaign quality</div><div className="section-title mt-1">Enrollment rate by campaign</div><div className="mt-5 space-y-4">{best.map(c=>{const rate=(c.enrolled/c.leads)*100; return <div key={c.id} className="rounded-xl border border-slate-100 p-4"><div className="flex items-start justify-between gap-4"><div><div className="text-sm font-semibold text-slate-800">{c.name}</div><div className="mt-1 text-xs text-slate-400">{c.platform} · {c.leads} leads</div></div><div className="text-right"><div className="text-lg font-bold text-slate-900">{rate.toFixed(1)}%</div><div className="text-[11px] text-slate-400">lead → enrolled</div></div></div><div className="mt-3 flex items-center justify-between text-xs"><span className="text-slate-500">Revenue</span><span className="font-bold text-emerald-600">{formatCompactINR(c.revenue)}</span></div></div>})}</div></div></div></>;
+}
+function Kpi({label,value,note}:{label:string;value:string;note:string}){return <div className="card-pad"><div className="text-sm text-slate-500">{label}</div><div className="mt-2 text-3xl font-bold text-slate-950">{value}</div><div className="mt-2 text-xs text-slate-400">{note}</div></div>}
