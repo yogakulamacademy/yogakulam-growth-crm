@@ -1,9 +1,9 @@
-import { Activity, CheckCircle2, Cookie, Fingerprint, MousePointerClick, ShieldCheck, Tags } from 'lucide-react';
+import { Activity, CheckCircle2, Cookie, Fingerprint, MousePointerClick, ShieldCheck, Tags, UserPlus, ExternalLink } from 'lucide-react';
 import { PageHeader, StatCard } from '@/components/ui';
-import { getTrackingHealth, isMockMode } from '@/lib/data';
+import { getTrackingHealth, getWebsiteCaptureHealth, getWebFunnel7d, isMockMode } from '@/lib/data';
 
 export default async function TrackingPage() {
-  const health = await getTrackingHealth();
+  const [health, capture, funnel] = await Promise.all([getTrackingHealth(), getWebsiteCaptureHealth(), getWebFunnel7d()]);
   const mock = isMockMode();
   const identifiedShare = health.events24h ? Math.round((health.identifiedEvents24h / health.events24h) * 100) : 0;
 
@@ -15,6 +15,14 @@ export default async function TrackingPage() {
       <StatCard label="Visitors · 24h" value={health.visitors24h.toLocaleString()} note="Anonymous first-party visitor IDs" icon={<Fingerprint size={18}/>} />
       <StatCard label="Identified events" value={`${identifiedShare}%`} note="Already attached to CRM leads" icon={<CheckCircle2 size={18}/>} />
       <StatCard label="Ad click IDs · 7d" value={(health.gclidEvents7d + health.fbclidEvents7d).toLocaleString()} note="Google + Meta click identifiers" icon={<Tags size={18}/>} />
+    </div>
+
+
+    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <StatCard label="Website enquiries · 24h" value={capture.submissions24h.toLocaleString()} note={`${capture.newLeads24h} new · ${capture.matchedExisting24h} matched existing`} icon={<UserPlus size={18}/>} />
+      <StatCard label="Form starts · 7d" value={funnel.formStarts.toLocaleString()} note={`${funnel.browserFormSubmits} tracked browser submits`} icon={<MousePointerClick size={18}/>} />
+      <StatCard label="Contact CTA clicks · 7d" value={funnel.contactCtaClicks.toLocaleString()} note="WhatsApp, Instagram, email, phone and booking CTAs" icon={<ExternalLink size={18}/>} />
+      <StatCard label="Website visitors · 7d" value={funnel.visitors.toLocaleString()} note={`${funnel.pageViews.toLocaleString()} page views`} icon={<Fingerprint size={18}/>} />
     </div>
 
     <div className="mt-4 grid gap-4 xl:grid-cols-[1.08fr_.92fr]">
@@ -43,6 +51,24 @@ export default async function TrackingPage() {
             ['Linking', 'When a lead is created, historical visitor touchpoints can be attached to that CRM lead'],
           ].map(([title,text]) => <div key={title} className="rounded-xl border border-slate-200 p-4"><div className="text-sm font-bold text-slate-800">{title}</div><div className="mt-1 text-xs leading-5 text-slate-500">{text}</div></div>)}
         </div>
+      </div>
+    </div>
+
+
+    <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <div className="card-pad">
+        <div className="eyebrow">Automatic CRM lead creation</div>
+        <div className="section-title mt-1">Website form → CRM</div>
+        <p className="mt-2 text-sm leading-6 text-slate-500">Mark enquiry forms with <code>data-yk-lead-form</code>. The tracker adds visitor/session attribution as hidden fields. After the website saves the enquiry, its PHP backend sends the same submission to the secure CRM capture endpoint.</p>
+        <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100"><code>{`<form method="post" data-yk-lead-form>
+  ...your existing fields...
+</form>`}</code></pre>
+      </div>
+      <div className="card-pad">
+        <div className="eyebrow">Server endpoint</div>
+        <div className="section-title mt-1">Keep the secret off the browser</div>
+        <p className="mt-2 text-sm leading-6 text-slate-500">Your website backend should POST JSON to <code>/api/leads/capture</code> with the <code>X-Website-Secret</code> header. Never place that secret in JavaScript, GTM or HTML.</p>
+        <div className="mt-4 rounded-xl bg-emerald-50 p-4 text-xs leading-5 text-emerald-800">Duplicate submissions are idempotent, and repeat enquiries with the same email/phone are matched to the existing CRM lead instead of creating another lead.</div>
       </div>
     </div>
 

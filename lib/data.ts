@@ -259,3 +259,55 @@ export async function getTrackingHealth(): Promise<TrackingHealth> {
     lastEventAt: row.last_event_at || undefined,
   };
 }
+
+export type WebsiteCaptureHealth = {
+  submissions24h: number;
+  newLeads24h: number;
+  matchedExisting24h: number;
+  submissions7d: number;
+  lastSubmissionAt?: string;
+};
+
+export type WebFunnel7d = {
+  pageViews: number;
+  visitors: number;
+  formStarts: number;
+  browserFormSubmits: number;
+  contactCtaClicks: number;
+  identifiedTouchpoints: number;
+};
+
+export async function getWebsiteCaptureHealth(): Promise<WebsiteCaptureHealth> {
+  if (useMockData) {
+    return { submissions24h: 17, newLeads24h: 14, matchedExisting24h: 3, submissions7d: 91, lastSubmissionAt: new Date().toISOString() };
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('v_website_capture_health').select('*').maybeSingle();
+  if (error) throw new Error(`Unable to load website capture health: ${error.message}`);
+  const row: any = data ?? {};
+  return {
+    submissions24h: Number(row.submissions_24h || 0),
+    newLeads24h: Number(row.new_leads_24h || 0),
+    matchedExisting24h: Number(row.matched_existing_24h || 0),
+    submissions7d: Number(row.submissions_7d || 0),
+    lastSubmissionAt: row.last_submission_at || undefined,
+  };
+}
+
+export async function getWebFunnel7d(): Promise<WebFunnel7d> {
+  if (useMockData) {
+    return { pageViews: 4318, visitors: 1290, formStarts: 301, browserFormSubmits: 106, contactCtaClicks: 412, identifiedTouchpoints: 682 };
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('v_web_funnel_7d').select('*').maybeSingle();
+  if (error) throw new Error(`Unable to load website funnel: ${error.message}`);
+  const row: any = data ?? {};
+  return {
+    pageViews: Number(row.page_views || 0),
+    visitors: Number(row.visitors || 0),
+    formStarts: Number(row.form_starts || 0),
+    browserFormSubmits: Number(row.browser_form_submits || 0),
+    contactCtaClicks: Number(row.contact_cta_clicks || 0),
+    identifiedTouchpoints: Number(row.identified_touchpoints || 0),
+  };
+}

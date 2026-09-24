@@ -128,17 +128,44 @@
     }
   };
 
+  function automaticLinkEvent(target) {
+    if (!target || !target.getAttribute) return null;
+    var href = target.getAttribute('href') || '';
+    if (!href) return null;
+    var lower = href.toLowerCase();
+    if (/wa\.me|api\.whatsapp\.com|whatsapp\.com/.test(lower)) return { event: 'whatsapp_click', channel: 'whatsapp' };
+    if (/instagram\.com/.test(lower)) return { event: 'instagram_click', channel: 'instagram' };
+    if (lower.indexOf('mailto:') === 0) return { event: 'email_click', channel: 'email' };
+    if (lower.indexOf('tel:') === 0) return { event: 'phone_click', channel: 'phone' };
+    if (/enrol|enroll|reservation|reserve|book-now|booking/.test(lower)) return { event: 'enrollment_cta_click', channel: 'website' };
+    return null;
+  }
+
   document.addEventListener('click', function (event) {
-    var target = event.target && event.target.closest ? event.target.closest('[data-yk-event]') : null;
+    var explicit = event.target && event.target.closest ? event.target.closest('[data-yk-event]') : null;
+    var target = explicit || (event.target && event.target.closest ? event.target.closest('a[href]') : null);
     if (!target) return;
-    send(target.getAttribute('data-yk-event') || 'cta_click', {
+    var automatic = explicit ? null : automaticLinkEvent(target);
+    if (!explicit && !automatic) return;
+    send(explicit ? (target.getAttribute('data-yk-event') || 'cta_click') : automatic.event, {
       label: target.getAttribute('data-yk-label') || (target.textContent || '').trim().slice(0,120),
       destination: target.getAttribute('href') || null,
-      contact_channel: target.getAttribute('data-yk-channel') || null
+      contact_channel: target.getAttribute('data-yk-channel') || (automatic && automatic.channel) || null,
+      automatic: !explicit
     });
   }, true);
 
   document.querySelectorAll('form[data-yk-lead-form]').forEach(decorateForm);
+
+  // A form-start event gives the funnel a useful step between page view and submission.
+  document.addEventListener('focusin', function (event) {
+    var form = event.target && event.target.closest ? event.target.closest('form[data-yk-lead-form]') : null;
+    if (!form || form.getAttribute('data-yk-started') === '1') return;
+    form.setAttribute('data-yk-started', '1');
+    decorateForm(form);
+    send('form_start', { form_id: form.id || null, form_name: form.getAttribute('name') || null });
+  }, true);
+
   document.addEventListener('submit', function (event) {
     var form = event.target && event.target.matches && event.target.matches('form[data-yk-lead-form]') ? event.target : null;
     if (!form) return;

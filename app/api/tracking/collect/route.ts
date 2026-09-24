@@ -18,17 +18,32 @@ export async function POST(request: NextRequest) {
     const supabase = createAdminClient();
     const touch = payload.sessionTouch || {};
 
+    // Once a browser has been identified as a CRM lead, keep future sessions and
+    // touchpoints attached automatically. Historical events are linked by the
+    // identify/website-capture flow.
+    const { data: identity, error: identityError } = await supabase
+      .from('visitor_identity_links')
+      .select('lead_id')
+      .eq('anonymous_visitor_id', payload.anonymousVisitorId)
+      .maybeSingle();
+    if (identityError) throw identityError;
+    const resolvedLeadId = identity?.lead_id ?? null;
+
     const { data: existingSession, error: existingError } = await supabase
       .from('web_sessions').select('id').eq('session_key', payload.sessionKey).maybeSingle();
     if (existingError) throw existingError;
 
     let session = existingSession;
     if (existingSession) {
-      const { error: updateError } = await supabase.from('web_sessions').update({ last_seen_at: new Date().toISOString() }).eq('id', existingSession.id);
+      const { error: updateError } = await supabase.from('web_sessions').update({
+        last_seen_at: new Date().toISOString(),
+        ...(resolvedLeadId ? { lead_id: resolvedLeadId } : {}),
+      }).eq('id', existingSession.id);
       if (updateError) throw updateError;
     } else {
       const sessionRow = {
         anonymous_visitor_id: payload.anonymousVisitorId,
+        lead_id: resolvedLeadId,
         session_key: payload.sessionKey,
         site: payload.site || null,
         source: touch.source || null,
@@ -57,6 +72,7 @@ export async function POST(request: NextRequest) {
 
     const eventRow = {
       event_id: payload.eventId,
+      lead_id: resolvedLeadId,
       web_session_id: session.id,
       anonymous_visitor_id: payload.anonymousVisitorId,
       occurred_at: payload.occurredAt || new Date().toISOString(),

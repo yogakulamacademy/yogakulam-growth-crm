@@ -23,6 +23,17 @@ export async function POST(request: NextRequest) {
     if (!leadId || !visitorId) throw new Error('leadId and anonymousVisitorId are required.');
 
     const supabase = createAdminClient();
+
+    const { error: linkError } = await supabase.from('visitor_identity_links').upsert({
+      anonymous_visitor_id: visitorId,
+      lead_id: leadId,
+      last_session_key: sessionKey,
+      source_system: 'tracking-identify',
+      linked_at: new Date().toISOString(),
+      metadata: {},
+    }, { onConflict: 'anonymous_visitor_id' });
+    if (linkError) throw linkError;
+
     const { data, error } = await supabase.rpc('attach_visitor_journey_to_lead', {
       p_lead_id: leadId,
       p_anonymous_visitor_id: visitorId,

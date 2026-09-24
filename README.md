@@ -1,24 +1,25 @@
-# Yogakulam Growth CRM v0.5
+# Yogakulam Growth CRM v0.6
 
 A working starter for Yogakulam Academy's lead-management, admissions-funnel and marketing-attribution system.
 
-## v0.5 milestone
+## v0.6 milestone
 
-The CRM now includes practical real-time admissions operations on top of the live Supabase CRM and first-party attribution layer.
+The CRM now adds production-ready website tracking and automatic server-to-server lead capture on top of the live admissions CRM.
 
 
-### New in v0.5
-- Supabase Realtime publication for leads, tasks, messages, activities, stage history and conversations.
-- Live UI refresh across open CRM tabs when those records change.
-- Manual inbound/outbound interaction logging for real testing before messaging APIs are connected.
-- Automatic conversation creation and message history persistence.
-- Contact timestamps update whenever an interaction is logged.
-- Practical funnel assistance: first outbound interaction can move `new → contacted`; inbound reply can move `new/contacted → engaged`.
-- Real conversation screen backed by stored CRM messages instead of the earlier static demo thread.
-- Follow-up completion and snooze/reschedule operations.
-- Lead detail now links directly into the shared conversation view.
+### New in v0.6
+- Secure `/api/leads/capture` endpoint for academy website PHP backends.
+- Idempotent website submissions using stable external enquiry IDs.
+- Automatic duplicate matching by normalized email/phone.
+- Anonymous website journey → known CRM lead linking that persists for future sessions/events.
+- `visitor_identity_links` and `lead_ingest_events` operational tables.
+- Website capture + 7-day web-funnel health views on `/tracking`.
+- Automatic WhatsApp / Instagram / email / phone / booking CTA click detection.
+- `form_start` measurement for marked enquiry forms.
+- Reusable PHP integration helper in `integrations/php/`.
+- Existing Supabase Realtime admissions operations from v0.5 remain enabled.
 
-This version is intended for day-to-day testing with real admissions staff before Instagram/WhatsApp send/receive APIs are connected.
+This version is intended for controlled production testing on one website enquiry flow before the tracker is rolled out site-wide.
 
 ### Existing tracking foundation from v0.3
 - Anonymous visitor + session IDs.
@@ -68,6 +69,7 @@ supabase/migrations/002_live_crm_auth_and_mutations.sql
 supabase/migrations/003_first_party_tracking.sql
 supabase/migrations/004_course_catalog_and_batches.sql   # optional for maintained batch catalog
 supabase/migrations/005_realtime_operations.sql
+supabase/migrations/006_website_lead_capture.sql
 ```
 
 Migration `002` adds the live-auth hardening and real CRM mutations used by v0.2.
@@ -125,9 +127,10 @@ For v0.3 tracking ingestion, also configure server-only values:
 SUPABASE_SECRET_KEY=sb_secret_...
 TRACKING_ALLOWED_ORIGINS=https://www.yogakulam.com,https://yogakulam.com,https://www.yogakulamacademy.com,https://yogakulamacademy.com
 TRACKING_INGEST_SECRET=<long-random-secret>
+WEBSITE_LEAD_CAPTURE_SECRET=<second-long-random-secret>
 ```
 
-See `docs/tracking-attribution-setup.md` for the public-site and GTM installation steps.
+See `docs/v06-website-integration.md` for the current public-site, GTM and PHP lead-capture setup.
 
 Legacy Supabase projects can use:
 
@@ -243,12 +246,12 @@ response_templates
 
 ## Next milestone
 
-After v0.5 is validated with real admissions usage, connect **real website lead capture + messaging channels**:
+After v0.6 is validated on real website enquiries:
 
-1. Website enquiry/reservation form → CRM lead creation + tracking identification.
-2. Instagram Messaging API webhooks → conversations/messages.
-3. WhatsApp Cloud API webhooks → conversations/messages.
-4. Identity merging across website / Instagram / WhatsApp.
+1. Instagram Messaging API webhooks → conversations/messages.
+2. WhatsApp Cloud API webhooks → conversations/messages.
+3. Identity merging across website / Instagram / WhatsApp.
+4. Payment/enrollment conversion events back into attribution.
 5. Only after the data path is stable: Claude qualification/reply Skills + MCP.
 
 ---

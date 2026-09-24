@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <BrandMark />
           <div>
             <div className="font-bold leading-tight text-slate-900">Yogakulam</div>
-            <div className="text-xs font-medium text-slate-400">Growth CRM · v0.5</div>
+            <div className="text-xs font-medium text-slate-400">Growth CRM · v0.6</div>
           </div>
         </div>
 
