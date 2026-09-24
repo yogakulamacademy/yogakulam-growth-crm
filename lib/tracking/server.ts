@@ -78,17 +78,28 @@ export function sanitizeTrackingPayload(input: unknown): TrackingPayload {
 }
 
 
+function normalizeOrigin(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '*') return trimmed;
+  try { return new URL(trimmed).origin; } catch { return trimmed.replace(/\/$/, ''); }
+}
+
+export function getTrackingAllowedOrigins() {
+  return (process.env.TRACKING_ALLOWED_ORIGINS || '')
+    .split(',').map(normalizeOrigin).filter(Boolean);
+}
+
 export function isTrackingOriginAllowed(origin: string | null) {
   if (!origin) return true;
-  const allowed = (process.env.TRACKING_ALLOWED_ORIGINS || '')
-    .split(',').map((v) => v.trim()).filter(Boolean);
-  return allowed.includes('*') || allowed.includes(origin);
+  const allowed = getTrackingAllowedOrigins();
+  const normalized = normalizeOrigin(origin);
+  return allowed.includes('*') || allowed.includes(normalized);
 }
 
 export function trackingCorsHeaders(origin: string | null) {
-  const allowed = (process.env.TRACKING_ALLOWED_ORIGINS || '')
-    .split(',').map((v) => v.trim()).filter(Boolean);
-  const allowOrigin = origin && (allowed.includes('*') || allowed.includes(origin)) ? origin : allowed[0] || '';
+  const allowed = getTrackingAllowedOrigins();
+  const normalized = origin ? normalizeOrigin(origin) : null;
+  const allowOrigin = normalized && (allowed.includes('*') || allowed.includes(normalized)) ? normalized : allowed[0] || '';
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',

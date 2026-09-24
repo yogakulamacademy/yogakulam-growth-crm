@@ -1,11 +1,44 @@
 (function () {
   'use strict';
-  var script = document.currentScript;
-  if (!script) return;
+
+  function findScript() {
+    if (document.currentScript) return document.currentScript;
+    var scripts = document.getElementsByTagName('script');
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      if ((scripts[i].src || '').indexOf('yogakulam-tracker.js') !== -1) return scripts[i];
+    }
+    return null;
+  }
+
+  var script = findScript();
+  if (!script) {
+    try { console.warn('[YKTracking] Tracker script element could not be identified.'); } catch (e) {}
+    return;
+  }
+
   var endpoint = script.dataset.endpoint || '/api/tracking/collect';
   var site = script.dataset.site || location.hostname;
   var consentMode = script.dataset.consentMode || 'required';
   var cookieDays = Number(script.dataset.cookieDays || '90');
+  var debug = script.dataset.debug === 'true';
+
+  function log() {
+    if (!debug || !window.console) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift('[YKTracking]');
+    console.log.apply(console, args);
+  }
+  function warn() {
+    if (!window.console) return;
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift('[YKTracking]');
+    console.warn.apply(console, args);
+  }
+  function pushDataLayer(payload) {
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push(payload);
+  }
+
   var storageOK = true;
   try { localStorage.setItem('__yk_test','1'); localStorage.removeItem('__yk_test'); } catch(e) { storageOK = false; }
 
@@ -68,8 +101,12 @@
   if (!sessionKey) sessionKey = uid('ses');
   if (consentGranted) { try { sessionStorage.setItem('yk_sid', sessionKey); } catch(e) {} }
 
-  function send(eventType, metadata) {
-    if (!consentGranted) return Promise.resolve({ skipped: true });
+  async function send(eventType, metadata) {
+    if (!consentGranted) {
+      log('Skipped event because analytics consent is not granted:', eventType);
+      pushDataLayer({ event: 'yk_tracking_skipped', yk_event_type: eventType, reason: 'consent_required' });
+      return { skipped: true, reason: 'consent_required' };
+    }
     var body = {
       eventId: uid('evt'), eventType: eventType, occurredAt: new Date().toISOString(), anonymousVisitorId: visitorId,
       sessionKey: sessionKey, site: site, pageUrl: location.href, pagePath: location.pathname + location.search,
@@ -79,10 +116,33 @@
     try {
       if (navigator.sendBeacon && eventType === 'page_exit') {
         navigator.sendBeacon(endpoint, new Blob([JSON.stringify(body)], { type: 'application/json' }));
-        return Promise.resolve({ ok: true });
+        return { ok: true, beacon: true };
       }
     } catch(e) {}
-    return fetch(endpoint, { method: 'POST', mode: 'cors', credentials: 'omit', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(function(){ return null; });
+
+    try {
+      log('Sending', eventType, body);
+      var response = await fetch(endpoint, {
+        method: 'POST', mode: 'cors', credentials: 'omit', keepalive: true,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      var result = null;
+      try { result = await response.json(); } catch(e) {}
+      if (!response.ok) {
+        var message = result && result.error ? result.error : ('HTTP ' + response.status);
+        warn('Event failed:', eventType, response.status, message);
+        pushDataLayer({ event: 'yk_tracking_error', yk_event_type: eventType, status: response.status, error: message });
+        return { ok: false, status: response.status, error: message };
+      }
+      log('Event recorded:', eventType, response.status);
+      pushDataLayer({ event: 'yk_tracking_sent', yk_event_type: eventType, status: response.status });
+      return result || { ok: true, status: response.status };
+    } catch (error) {
+      var message2 = error && error.message ? error.message : String(error);
+      warn('Network/CORS failure:', eventType, message2);
+      pushDataLayer({ event: 'yk_tracking_error', yk_event_type: eventType, status: 0, error: message2 });
+      return { ok: false, status: 0, error: message2 };
+    }
   }
 
   function decorateForm(form) {
@@ -102,12 +162,25 @@
 
   function pushReady() {
     if (!consentGranted) return;
-    window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push({ event: 'yk_tracking_ready', yk_visitor_id: visitorId, yk_session_id: sessionKey, yk_source: sessionTouch.source, yk_medium: sessionTouch.medium, yk_campaign: sessionTouch.campaign });
+    pushDataLayer({ event: 'yk_tracking_ready', yk_visitor_id: visitorId, yk_session_id: sessionKey, yk_source: sessionTouch.source, yk_medium: sessionTouch.medium, yk_campaign: sessionTouch.campaign });
   }
 
   window.YKTracking = {
     track: send,
+    status: function () {
+      return {
+        loaded: true,
+        endpoint: endpoint,
+        site: site,
+        consentMode: consentMode,
+        consentGranted: consentGranted,
+        debug: debug,
+        anonymousVisitorId: visitorId,
+        sessionKey: sessionKey,
+        firstTouch: firstTouch,
+        sessionTouch: sessionTouch
+      };
+    },
     context: function () { return consentGranted ? { anonymousVisitorId: visitorId, sessionKey: sessionKey, firstTouch: firstTouch, sessionTouch: sessionTouch } : null; },
     decorateForm: decorateForm,
     grantConsent: function () {
@@ -156,8 +229,6 @@
   }, true);
 
   document.querySelectorAll('form[data-yk-lead-form]').forEach(decorateForm);
-
-  // A form-start event gives the funnel a useful step between page view and submission.
   document.addEventListener('focusin', function (event) {
     var form = event.target && event.target.closest ? event.target.closest('form[data-yk-lead-form]') : null;
     if (!form || form.getAttribute('data-yk-started') === '1') return;
@@ -179,5 +250,10 @@
     if (detail.analytics === false) window.YKTracking.revokeConsent();
   });
 
+  log('Loaded', window.YKTracking.status());
   if (consentGranted) { pushReady(); send('page_view', { initial: true }); }
+  else {
+    pushDataLayer({ event: 'yk_tracking_waiting_for_consent' });
+    log('Waiting for analytics consent. For testing use data-consent-mode="granted".');
+  }
 })();
