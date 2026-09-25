@@ -2,6 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isTrackingOriginAllowed, sanitizeTrackingPayload, trackingCorsHeaders } from '@/lib/tracking/server';
 
+
+function decodeGeoHeader(value: string | null) {
+  if (!value) return null;
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getRequestGeo(request: NextRequest) {
+  return {
+    country:
+      request.headers.get('x-vercel-ip-country') || null,
+
+    region:
+      request.headers.get('x-vercel-ip-country-region') || null,
+
+    city:
+      decodeGeoHeader(
+        request.headers.get('x-vercel-ip-city')
+      ),
+
+    timezone:
+      request.headers.get('x-vercel-ip-timezone') || null,
+  };
+}
+
 export async function OPTIONS(request: NextRequest) {
   return new NextResponse(null, { status: 204, headers: trackingCorsHeaders(request.headers.get('origin')) });
 }
@@ -17,6 +46,7 @@ export async function POST(request: NextRequest) {
     const payload = sanitizeTrackingPayload(await request.json());
     const supabase = createAdminClient();
     const touch = payload.sessionTouch || {};
+    const geo = getRequestGeo(request);
 
     // Once a browser has been identified as a CRM lead, keep future sessions and
     // touchpoints attached automatically. Historical events are linked by the
@@ -35,10 +65,32 @@ export async function POST(request: NextRequest) {
 
     let session = existingSession;
     if (existingSession) {
-      const { error: updateError } = await supabase.from('web_sessions').update({
-        last_seen_at: new Date().toISOString(),
-        ...(resolvedLeadId ? { lead_id: resolvedLeadId } : {}),
-      }).eq('id', existingSession.id);
+      const { error: updateError } = await supabase
+  .from('web_sessions')
+  .update({
+    last_seen_at: new Date().toISOString(),
+
+    ...(resolvedLeadId
+      ? { lead_id: resolvedLeadId }
+      : {}),
+
+    ...(geo.country
+      ? { geo_country: geo.country }
+      : {}),
+
+    ...(geo.region
+      ? { geo_region: geo.region }
+      : {}),
+
+    ...(geo.city
+      ? { geo_city: geo.city }
+      : {}),
+
+    ...(geo.timezone
+      ? { geo_timezone: geo.timezone }
+      : {}),
+  })
+  .eq('id', existingSession.id);
       if (updateError) throw updateError;
     } else {
       const sessionRow = {
@@ -48,6 +100,10 @@ export async function POST(request: NextRequest) {
         site: payload.site || null,
         source: touch.source || null,
         medium: touch.medium || null,
+        geo_country: geo.country,
+        geo_region: geo.region,
+        geo_city: geo.city,
+        geo_timezone: geo.timezone,
         campaign_name: touch.campaign || null,
         landing_page: payload.pageUrl || payload.pagePath || null,
         referrer: payload.referrer || null,
@@ -75,6 +131,9 @@ export async function POST(request: NextRequest) {
       lead_id: resolvedLeadId,
       web_session_id: session.id,
       anonymous_visitor_id: payload.anonymousVisitorId,
+      geo_country: geo.country,
+      geo_region: geo.region,
+      geo_city: geo.city,
       occurred_at: payload.occurredAt || new Date().toISOString(),
       source: touch.source || null,
       medium: touch.medium || null,
