@@ -34,15 +34,23 @@ export type CourseBatchOption = {
   id: string;
   courseId: string;
   batchCode: string;
+
   location?: string;
   mode?: string;
+
   startDate?: string;
   endDate?: string;
+
   startTime?: string;
   endTime?: string;
+
   timezone?: string;
+
   capacity?: number;
   seatsRemaining?: number;
+
+  expectedValue?: number;
+  currency?: string;
 };
 
 
@@ -1349,7 +1357,6 @@ Promise<CourseBatchOption[]> {
     return [];
   }
 
-
   const supabase =
     await createClient();
 
@@ -1371,7 +1378,9 @@ Promise<CourseBatchOption[]> {
       end_time,
       timezone,
       capacity,
-      seats_remaining
+      seats_remaining,
+      expected_value,
+      currency
     `)
     .eq(
       'active',
@@ -1439,16 +1448,21 @@ Promise<CourseBatchOption[]> {
       capacity:
         row.capacity == null
           ? undefined
-          : Number(
-              row.capacity
-            ),
+          : Number(row.capacity),
 
       seatsRemaining:
         row.seats_remaining == null
           ? undefined
-          : Number(
-              row.seats_remaining
-            ),
+          : Number(row.seats_remaining),
+
+      expectedValue:
+        row.expected_value == null
+          ? undefined
+          : Number(row.expected_value),
+
+      currency:
+        row.currency ??
+        undefined,
 
     })
   );
