@@ -1,10 +1,31 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login'];
+// These routes must be reachable without a Supabase user session.
+// Security for public ingestion endpoints is enforced inside each API route:
+// - tracking/collect: allowed Origin + payload validation
+// - tracking/identify: allowed Origin + TRACKING_INGEST_SECRET
+// - leads/capture: WEBSITE_LEAD_CAPTURE_SECRET
+const PUBLIC_EXACT_PATHS = new Set([
+  '/login',
+  '/yogakulam-tracker.js',
+  '/api/leads/capture',
+]);
+
+function isPublicPath(pathname: string) {
+  if (PUBLIC_EXACT_PATHS.has(pathname)) return true;
+  if (pathname.startsWith('/api/tracking/')) return true;
+  return false;
+}
 
 export async function middleware(request: NextRequest) {
   if (process.env.NEXT_PUBLIC_USE_MOCK_DATA !== 'false') return NextResponse.next();
+
+  // Public browser/server integration routes must bypass CRM user authentication.
+  // Their own route-level controls remain responsible for authorization.
+  if (isPublicPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -26,16 +47,15 @@ export async function middleware(request: NextRequest) {
 
   const { data } = await supabase.auth.getClaims();
   const isAuthenticated = Boolean(data?.claims?.sub);
-  const isPublic = PUBLIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path));
 
-  if (!isAuthenticated && !isPublic) {
+  if (!isAuthenticated) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/login';
     redirectUrl.searchParams.set('next', request.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (isAuthenticated && request.nextUrl.pathname === '/login') {
+  if (request.nextUrl.pathname === '/login') {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = '/dashboard';
     redirectUrl.search = '';
