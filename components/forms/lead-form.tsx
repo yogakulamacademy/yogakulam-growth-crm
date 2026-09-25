@@ -1,10 +1,6 @@
 'use client';
 
-import {
-  useMemo,
-  useState,
-} from 'react';
-
+import { useMemo, useState } from 'react';
 import {
   CalendarDays,
   CircleDollarSign,
@@ -13,14 +9,19 @@ import {
   Monitor,
 } from 'lucide-react';
 
-import type {
-  LeadDetail,
-} from '@/types/crm';
-
+// import type { LeadDetail } from '@/types/crm';
 import type {
   CourseBatchOption,
   CourseOption,
+  EnrichedLeadDetail,
 } from '@/lib/data';
+
+
+// type LeadWithRevenue = LeadDetail & {
+//   potentialValue?: number;
+//   potentialCurrency?: string;
+//   potentialValueSource?: string;
+// };
 
 
 const channels = [
@@ -38,72 +39,36 @@ const channels = [
    DATE HELPERS
 ========================================================= */
 
-function dateLabel(
-  value?: string
-) {
+function dateLabel(value?: string) {
+  if (!value) return '';
 
-  if (!value) {
-    return '';
-  }
+  const date = new Date(`${value}T00:00:00`);
 
-
-  const date =
-    new Date(
-      `${value}T00:00:00`
-    );
-
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
+  if (Number.isNaN(date.getTime())) {
     return value;
   }
 
-
-  return new Intl.DateTimeFormat(
-    'en',
-    {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }
-  ).format(date);
+  return new Intl.DateTimeFormat('en', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
 }
 
 
-function monthLabel(
-  value?: string
-) {
+function monthLabel(value?: string) {
+  if (!value) return '—';
 
-  if (!value) {
-    return '—';
-  }
+  const date = new Date(`${value}T00:00:00`);
 
-
-  const date =
-    new Date(
-      `${value}T00:00:00`
-    );
-
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
+  if (Number.isNaN(date.getTime())) {
     return value;
   }
 
-
-  return new Intl.DateTimeFormat(
-    'en',
-    {
-      month: 'long',
-      year: 'numeric',
-    }
-  ).format(date);
+  return new Intl.DateTimeFormat('en', {
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
 
@@ -111,41 +76,25 @@ function monthLabel(
    BATCH LABEL
 ========================================================= */
 
-function batchLabel(
-  batch: CourseBatchOption
-) {
-
-  const dates =
-    batch.startDate
-      ? `${dateLabel(batch.startDate)}${
-          batch.endDate
-            ? ` – ${dateLabel(batch.endDate)}`
-            : ''
-        }`
-      : 'Dates TBA';
-
+function batchLabel(batch: CourseBatchOption) {
+  const dates = batch.startDate
+    ? `${dateLabel(batch.startDate)}${
+        batch.endDate
+          ? ` – ${dateLabel(batch.endDate)}`
+          : ''
+      }`
+    : 'Dates TBA';
 
   const place =
     batch.location ||
-    (
-      batch.mode === 'online'
-        ? 'Online'
-        : 'Location TBA'
-    );
-
+    (batch.mode === 'online'
+      ? 'Online'
+      : 'Location TBA');
 
   const time =
-    batch.startTime &&
-    batch.endTime
-      ? ` · ${batch.startTime.slice(
-          0,
-          5
-        )}–${batch.endTime.slice(
-          0,
-          5
-        )}`
+    batch.startTime && batch.endTime
+      ? ` · ${batch.startTime.slice(0, 5)}–${batch.endTime.slice(0, 5)}`
       : '';
-
 
   return `${dates} · ${place}${time}`;
 }
@@ -159,7 +108,6 @@ function moneyLabel(
   value?: number,
   currency?: string
 ) {
-
   if (
     value == null ||
     !currency
@@ -167,24 +115,21 @@ function moneyLabel(
     return 'Not configured';
   }
 
+  const code = currency.toUpperCase();
 
   try {
-
     return new Intl.NumberFormat(
-      currency === 'INR'
+      code === 'INR'
         ? 'en-IN'
         : 'en-US',
       {
         style: 'currency',
-        currency,
+        currency: code,
         maximumFractionDigits: 0,
       }
     ).format(value);
-
   } catch {
-
-    return `${currency} ${value}`;
-
+    return `${code} ${value}`;
   }
 }
 
@@ -193,20 +138,11 @@ function moneyLabel(
    MODE
 ========================================================= */
 
-function modeLabel(
-  value?: string
-) {
-
-  if (!value) {
-    return '—';
-  }
-
+function modeLabel(value?: string) {
+  if (!value) return '—';
 
   return value
-    .replaceAll(
-      '_',
-      ' '
-    )
+    .replaceAll('_', ' ')
     .replace(
       /\b\w/g,
       (letter) =>
@@ -228,16 +164,12 @@ export function LeadForm({
 }: {
   courses: CourseOption[];
   batches: CourseBatchOption[];
-  lead?: LeadDetail;
-  action:
-    (
-      formData: FormData
-    ) =>
-      void |
-      Promise<void>;
+  lead?: EnrichedLeadDetail;
+  action: (
+    formData: FormData
+  ) => void | Promise<void>;
   submitLabel?: string;
 }) {
-
 
   /* =======================================================
      STATE
@@ -247,19 +179,15 @@ export function LeadForm({
     courseId,
     setCourseId,
   ] = useState(
-    lead?.interestedCourseId ??
-    ''
+    lead?.interestedCourseId ?? ''
   );
-
 
   const [
     batchId,
     setBatchId,
   ] = useState(
-    lead?.preferredBatchId ??
-    ''
+    lead?.preferredBatchId ?? ''
   );
-
 
   const [
     location,
@@ -267,41 +195,81 @@ export function LeadForm({
   ] = useState(
     lead?.location === '—'
       ? ''
-      : lead?.location ??
-        ''
+      : lead?.location ?? ''
   );
-
 
   const [
     month,
     setMonth,
   ] = useState(
-    lead?.preferredMonthRaw ??
-    ''
+    lead?.preferredMonthRaw ?? ''
   );
-
 
   const [
     mode,
     setMode,
   ] = useState(
-    lead?.preferredMode
-      ?.toLowerCase() ??
-    ''
+    lead?.preferredMode?.toLowerCase() ?? ''
   );
-
 
   const [
     timezone,
     setTimezone,
   ] = useState(
-    lead?.timezone ??
-    ''
+    lead?.timezone ?? ''
+  );
+
+
+  /*
+   * Revenue value mode.
+   *
+   * batch_default =
+   * use course_batches.expected_value
+   *
+   * manual =
+   * admissions-entered scholarship /
+   * negotiated / custom value
+   */
+  const [
+    potentialMode,
+    setPotentialMode,
+  ] = useState<
+    'batch_default' |
+    'manual'
+  >(
+    lead?.potentialValueSource === 'manual'
+      ? 'manual'
+      : 'batch_default'
+  );
+
+
+  const [
+    manualPotentialValue,
+    setManualPotentialValue,
+  ] = useState(
+    lead?.potentialValueSource === 'manual' &&
+    lead?.potentialValue != null
+      ? String(lead.potentialValue)
+      : ''
+  );
+
+
+  const [
+    manualCurrency,
+    setManualCurrency,
+  ] = useState(
+    lead?.potentialValueSource === 'manual'
+      ? (
+          lead?.potentialCurrency
+            ?.toUpperCase() ??
+          ''
+        )
+      : ''
   );
 
 
   /* =======================================================
-     FILTER BATCHES BY COURSE
+     FILTER BATCHES
   ======================================================= */
 
   const courseBatches =
@@ -310,8 +278,7 @@ export function LeadForm({
         batches.filter(
           (batch) =>
             !courseId ||
-            batch.courseId ===
-              courseId
+            batch.courseId === courseId
         ),
       [
         batches,
@@ -329,8 +296,7 @@ export function LeadForm({
       () =>
         batches.find(
           (batch) =>
-            batch.id ===
-            batchId
+            batch.id === batchId
         ),
       [
         batches,
@@ -346,43 +312,29 @@ export function LeadForm({
   function selectCourse(
     nextCourseId: string
   ) {
-
-    setCourseId(
-      nextCourseId
-    );
-
+    setCourseId(nextCourseId);
 
     const existingBatch =
       batches.find(
         (batch) =>
-          batch.id ===
-          batchId
+          batch.id === batchId
       );
 
-
     /*
-     * If the currently selected batch
-     * belongs to another course,
-     * reset it.
+     * If current batch belongs
+     * to another course, clear it.
      */
     if (
       existingBatch &&
       existingBatch.courseId !==
         nextCourseId
     ) {
-
       setBatchId('');
-
       setLocation('');
-
       setMonth('');
-
       setMode('');
-
       setTimezone('');
-
     }
-
   }
 
 
@@ -393,84 +345,90 @@ export function LeadForm({
   function selectBatch(
     nextBatchId: string
   ) {
-
-    setBatchId(
-      nextBatchId
-    );
-
+    setBatchId(nextBatchId);
 
     if (!nextBatchId) {
       return;
     }
 
-
     const batch =
       batches.find(
         (item) =>
-          item.id ===
-          nextBatchId
+          item.id === nextBatchId
       );
-
 
     if (!batch) {
       return;
     }
 
-
     /*
-     * Batch becomes the source of truth.
+     * Batch becomes source of truth
+     * for admissions preferences.
      */
-    setCourseId(
-      batch.courseId
-    );
+    setCourseId(batch.courseId);
 
-
-    if (
-      batch.location
-    ) {
-
-      setLocation(
-        batch.location
-      );
-
+    if (batch.location) {
+      setLocation(batch.location);
     }
 
-
-    if (
-      batch.startDate
-    ) {
-
+    if (batch.startDate) {
       setMonth(
         batch.startDate.slice(
           0,
           7
         )
       );
-
     }
 
-
-    if (
-      batch.mode
-    ) {
-
-      setMode(
-        batch.mode
-      );
-
+    if (batch.mode) {
+      setMode(batch.mode);
     }
 
-
-    if (
-      batch.timezone
-    ) {
-
+    if (batch.timezone) {
       setTimezone(
         batch.timezone
       );
+    }
+  }
 
+
+  /* =======================================================
+     MANUAL OVERRIDE
+  ======================================================= */
+
+  function activateManualValue() {
+    setPotentialMode('manual');
+
+    /*
+     * Start with the batch value so the
+     * user only needs to edit the amount.
+     */
+    if (
+      !manualPotentialValue &&
+      selectedBatch?.expectedValue != null
+    ) {
+      setManualPotentialValue(
+        String(
+          selectedBatch.expectedValue
+        )
+      );
     }
 
+    if (
+      !manualCurrency &&
+      selectedBatch?.currency
+    ) {
+      setManualCurrency(
+        selectedBatch.currency.toUpperCase()
+      );
+    }
+  }
+
+
+  function activateBatchDefault() {
+    setPotentialMode(
+      'batch_default'
+    );
   }
 
 
@@ -479,12 +437,10 @@ export function LeadForm({
   ======================================================= */
 
   return (
-
     <form
       action={action}
       className="space-y-5"
     >
-
 
       {/* ===================================================
           CONTACT
@@ -501,14 +457,7 @@ export function LeadForm({
         </div>
 
 
-        <div
-          className="
-            mt-5
-            grid
-            gap-4
-            md:grid-cols-2
-          "
-        >
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
 
           <Field
             label="First name"
@@ -516,9 +465,7 @@ export function LeadForm({
             required
             defaultValue={
               lead?.firstName ??
-              lead?.name.split(
-                ' '
-              )[0] ??
+              lead?.name.split(' ')[0] ??
               ''
             }
           />
@@ -545,9 +492,7 @@ export function LeadForm({
               lead?.email
             }
             disabled={
-              Boolean(
-                lead
-              )
+              Boolean(lead)
             }
             note={
               lead
@@ -564,9 +509,7 @@ export function LeadForm({
               lead?.phone
             }
             disabled={
-              Boolean(
-                lead
-              )
+              Boolean(lead)
             }
           />
 
@@ -576,7 +519,7 @@ export function LeadForm({
 
 
       {/* ===================================================
-          COURSE
+          ADMISSIONS
       =================================================== */}
 
       <section className="card-pad">
@@ -590,15 +533,7 @@ export function LeadForm({
         </div>
 
 
-        <div
-          className="
-            mt-5
-            grid
-            gap-4
-            md:grid-cols-2
-          "
-        >
-
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
 
           {/* COURSE */}
 
@@ -608,15 +543,12 @@ export function LeadForm({
               Course
             </span>
 
-
             <select
               className="input"
               name="course_id"
               value={courseId}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   selectCourse(
                     event.target.value
                   )
@@ -627,17 +559,14 @@ export function LeadForm({
                 Not selected
               </option>
 
-
               {courses.map(
                 (course) => (
-
                   <option
                     key={course.id}
                     value={course.id}
                   >
                     {course.name}
                   </option>
-
                 )
               )}
 
@@ -654,45 +583,33 @@ export function LeadForm({
               Upcoming batch
             </span>
 
-
             <select
               className="input"
               name="preferred_batch_id"
               value={batchId}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   selectBatch(
                     event.target.value
                   )
               }
-              disabled={
-                !courseId
-              }
+              disabled={!courseId}
             >
 
               <option value="">
-
                 {courseId
                   ? 'Not selected / custom preference'
                   : 'Select a course first'}
-
               </option>
-
 
               {courseBatches.map(
                 (batch) => (
-
                   <option
                     key={batch.id}
                     value={batch.id}
                   >
-                    {batchLabel(
-                      batch
-                    )}
+                    {batchLabel(batch)}
                   </option>
-
                 )
               )}
 
@@ -700,40 +617,19 @@ export function LeadForm({
 
 
             {courseId &&
-              courseBatches.length ===
-                0 && (
-
-              <span
-                className="
-                  mt-1
-                  block
-                  text-xs
-                  text-slate-400
-                "
-              >
-                No active batches are stored for this course yet.
-                You can still enter preferences manually.
-              </span>
-
-            )}
+              courseBatches.length === 0 && (
+                <span className="mt-1 block text-xs text-slate-400">
+                  No active batches are stored for this course yet.
+                  You can still enter preferences manually.
+                </span>
+              )}
 
 
             {selectedBatch && (
-
-              <span
-                className="
-                  mt-1
-                  block
-                  text-xs
-                  font-medium
-                  text-emerald-700
-                "
-              >
-                Batch selected:
-                {' '}
+              <span className="mt-1 block text-xs font-medium text-emerald-700">
+                Batch selected:{' '}
                 {selectedBatch.batchCode}
               </span>
-
             )}
 
           </label>
@@ -742,92 +638,39 @@ export function LeadForm({
 
 
         {/* =================================================
-            BATCH INTELLIGENCE PREVIEW
+            BATCH INTELLIGENCE
         ================================================= */}
 
         {selectedBatch && (
+          <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
 
-          <div
-            className="
-              mt-5
-              rounded-2xl
-              border
-              border-emerald-100
-              bg-emerald-50/50
-              p-4
-            "
-          >
-
-            <div
-              className="
-                flex
-                items-start
-                justify-between
-                gap-4
-              "
-            >
+            <div className="flex items-start justify-between gap-4">
 
               <div>
 
-                <div
-                  className="
-                    text-xs
-                    font-bold
-                    uppercase
-                    tracking-[.12em]
-                    text-emerald-700
-                  "
-                >
+                <div className="text-xs font-bold uppercase tracking-[.12em] text-emerald-700">
                   Automatic lead intelligence
                 </div>
 
-
-                <div
-                  className="
-                    mt-1
-                    text-sm
-                    font-semibold
-                    text-slate-800
-                  "
-                >
-                  These values will be filled automatically from the selected batch.
+                <div className="mt-1 text-sm font-semibold text-slate-800">
+                  These values are derived automatically from the selected batch.
                 </div>
 
               </div>
 
 
-              <span
-                className="
-                  rounded-lg
-                  bg-white
-                  px-2.5
-                  py-1
-                  text-xs
-                  font-bold
-                  text-emerald-700
-                "
-              >
+              <span className="rounded-lg bg-white px-2.5 py-1 text-xs font-bold text-emerald-700">
                 {selectedBatch.batchCode}
               </span>
 
             </div>
 
 
-            <div
-              className="
-                mt-4
-                grid
-                gap-3
-                sm:grid-cols-2
-                lg:grid-cols-3
-              "
-            >
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 
               <BatchInfo
                 icon={
-                  <MapPin
-                    size={15}
-                  />
+                  <MapPin size={15} />
                 }
                 label="Location"
                 value={
@@ -839,9 +682,7 @@ export function LeadForm({
 
               <BatchInfo
                 icon={
-                  <CalendarDays
-                    size={15}
-                  />
+                  <CalendarDays size={15} />
                 }
                 label="Preferred month"
                 value={
@@ -854,9 +695,7 @@ export function LeadForm({
 
               <BatchInfo
                 icon={
-                  <Monitor
-                    size={15}
-                  />
+                  <Monitor size={15} />
                 }
                 label="Mode"
                 value={
@@ -869,11 +708,9 @@ export function LeadForm({
 
               <BatchInfo
                 icon={
-                  <CircleDollarSign
-                    size={15}
-                  />
+                  <CircleDollarSign size={15} />
                 }
-                label="Potential value"
+                label="Batch default value"
                 value={
                   moneyLabel(
                     selectedBatch.expectedValue,
@@ -885,9 +722,7 @@ export function LeadForm({
 
               <BatchInfo
                 icon={
-                  <CalendarDays
-                    size={15}
-                  />
+                  <CalendarDays size={15} />
                 }
                 label="Expected close"
                 value={
@@ -902,9 +737,7 @@ export function LeadForm({
 
               <BatchInfo
                 icon={
-                  <Clock3
-                    size={15}
-                  />
+                  <Clock3 size={15} />
                 }
                 label="Timezone"
                 value={
@@ -917,44 +750,277 @@ export function LeadForm({
 
 
             {selectedBatch.expectedValue == null && (
-
-              <div
-                className="
-                  mt-3
-                  rounded-xl
-                  border
-                  border-amber-100
-                  bg-amber-50
-                  px-3
-                  py-2
-                  text-xs
-                  text-amber-700
-                "
-              >
+              <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 This batch does not yet have a default revenue value.
-                The lead will remain unvalued in Revenue Forecast until a value is configured.
+                The lead will remain unvalued unless you use a manual override.
               </div>
-
             )}
 
           </div>
-
         )}
+
+
+        {/* =================================================
+            REVENUE VALUE
+        ================================================= */}
+
+        <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+
+          <div className="eyebrow">
+            Revenue value
+          </div>
+
+          <div className="section-title mt-1">
+            Potential lead value
+          </div>
+
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Use the standard batch value for normal enquiries.
+            Use a manual override for scholarships, discounts,
+            negotiated fees or special offers.
+          </p>
+
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+
+            {/* BATCH DEFAULT */}
+
+            <label
+              className={`cursor-pointer rounded-xl border p-4 transition ${
+                potentialMode ===
+                'batch_default'
+                  ? 'border-emerald-200 bg-emerald-50'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+
+              <div className="flex items-start gap-3">
+
+                <input
+                  className="mt-1"
+                  type="radio"
+                  name="potential_value_mode"
+                  value="batch_default"
+                  checked={
+                    potentialMode ===
+                    'batch_default'
+                  }
+                  onChange={
+                    activateBatchDefault
+                  }
+                />
+
+
+                <div>
+
+                  <div className="text-sm font-bold text-slate-800">
+                    Batch default
+                  </div>
+
+                  <div className="mt-1 text-xs leading-5 text-slate-500">
+                    Automatically use the standard value configured for this batch.
+                  </div>
+
+
+                  {selectedBatch ? (
+                    <div className="mt-2 text-sm font-bold text-emerald-700">
+                      {moneyLabel(
+                        selectedBatch.expectedValue,
+                        selectedBatch.currency
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs font-medium text-slate-400">
+                      Select a batch first
+                    </div>
+                  )}
+
+                </div>
+
+              </div>
+
+            </label>
+
+
+            {/* MANUAL */}
+
+            <label
+              className={`cursor-pointer rounded-xl border p-4 transition ${
+                potentialMode ===
+                'manual'
+                  ? 'border-orange-200 bg-orange-50'
+                  : 'border-slate-200 bg-white'
+              }`}
+            >
+
+              <div className="flex items-start gap-3">
+
+                <input
+                  className="mt-1"
+                  type="radio"
+                  name="potential_value_mode"
+                  value="manual"
+                  checked={
+                    potentialMode ===
+                    'manual'
+                  }
+                  onChange={
+                    activateManualValue
+                  }
+                />
+
+
+                <div>
+
+                  <div className="text-sm font-bold text-slate-800">
+                    Manual override
+                  </div>
+
+                  <div className="mt-1 text-xs leading-5 text-slate-500">
+                    Enter a custom potential value for this specific lead.
+                  </div>
+
+
+                  {potentialMode ===
+                    'manual' &&
+                    manualPotentialValue && (
+                      <div className="mt-2 text-sm font-bold text-orange-700">
+                        {moneyLabel(
+                          Number(
+                            manualPotentialValue
+                          ),
+                          manualCurrency ||
+                          undefined
+                        )}
+                      </div>
+                    )}
+
+                </div>
+
+              </div>
+
+            </label>
+
+          </div>
+
+
+          {/* MANUAL VALUE INPUT */}
+
+          {potentialMode ===
+            'manual' && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_180px]">
+
+                <label className="block">
+
+                  <span className="field-label">
+                    Potential value
+                  </span>
+
+                  <input
+                    className="input"
+                    name="potential_value"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    value={
+                      manualPotentialValue
+                    }
+                    onChange={
+                      (event) =>
+                        setManualPotentialValue(
+                          event.target.value
+                        )
+                    }
+                    placeholder="e.g. 1200"
+                  />
+
+                </label>
+
+
+                <label className="block">
+
+                  <span className="field-label">
+                    Currency
+                  </span>
+
+                  <select
+                    className="input"
+                    name="potential_currency"
+                    required
+                    value={
+                      manualCurrency
+                    }
+                    onChange={
+                      (event) =>
+                        setManualCurrency(
+                          event.target.value
+                        )
+                    }
+                  >
+
+                    <option value="">
+                      Select
+                    </option>
+
+                    <option value="USD">
+                      USD
+                    </option>
+
+                    <option value="INR">
+                      INR
+                    </option>
+
+                  </select>
+
+                </label>
+
+              </div>
+            )}
+
+
+          {/* MANUAL WARNING */}
+
+          {potentialMode ===
+            'manual' && (
+              <div className="mt-3 rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 text-xs leading-5 text-orange-700">
+                Manual override is active. Future changes to the batch default value will not overwrite this lead's potential value.
+              </div>
+            )}
+
+
+          {/* DEFAULT WITHOUT BATCH */}
+
+          {potentialMode ===
+            'batch_default' &&
+            !selectedBatch && (
+              <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                No batch is selected. This lead will remain unvalued unless you select a batch or use a manual override.
+              </div>
+            )}
+
+
+          {/* RESET MESSAGE */}
+
+          {lead?.potentialValueSource ===
+            'manual' &&
+            potentialMode ===
+              'batch_default' && (
+              <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700">
+                Saving now will remove the existing manual override and restore the selected batch's default value.
+              </div>
+            )}
+
+        </div>
 
 
         {/* =================================================
             PREFERENCES
         ================================================= */}
 
-        <div
-          className="
-            mt-5
-            grid
-            gap-4
-            md:grid-cols-2
-          "
-        >
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
 
+          {/* LOCATION */}
 
           <label className="block">
 
@@ -962,15 +1028,12 @@ export function LeadForm({
               Preferred location
             </span>
 
-
             <input
               className="input"
               name="preferred_location"
               value={location}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   setLocation(
                     event.target.value
                   )
@@ -985,15 +1048,15 @@ export function LeadForm({
 
 
             {selectedBatch && (
-
               <span className="mt-1 block text-xs text-slate-400">
                 Automatically controlled by the selected batch.
               </span>
-
             )}
 
           </label>
 
+
+          {/* MONTH */}
 
           <label className="block">
 
@@ -1001,16 +1064,13 @@ export function LeadForm({
               Preferred month
             </span>
 
-
             <input
               className="input"
               name="preferred_month"
               type="month"
               value={month}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   setMonth(
                     event.target.value
                   )
@@ -1025,21 +1085,20 @@ export function LeadForm({
           </label>
 
 
+          {/* MODE */}
+
           <label className="block">
 
             <span className="field-label">
               Preferred mode
             </span>
 
-
             <select
               className="input"
               name="preferred_mode"
               value={mode}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   setMode(
                     event.target.value
                   )
@@ -1075,21 +1134,22 @@ export function LeadForm({
 
 
             {/*
-             * Disabled inputs do not submit.
-             * Keep a hidden value when batch controls mode.
-             */}
+              Disabled form controls do not submit,
+              so send mode using a hidden input
+              whenever a batch controls the field.
+            */}
             {selectedBatch && (
-
               <input
                 type="hidden"
                 name="preferred_mode"
                 value={mode}
               />
-
             )}
 
           </label>
 
+
+          {/* COUNTRY */}
 
           <Field
             label="Country"
@@ -1102,21 +1162,20 @@ export function LeadForm({
           />
 
 
+          {/* TIMEZONE */}
+
           <label className="block">
 
             <span className="field-label">
               Timezone
             </span>
 
-
             <input
               className="input"
               name="timezone"
               value={timezone}
               onChange={
-                (
-                  event
-                ) =>
+                (event) =>
                   setTimezone(
                     event.target.value
                   )
@@ -1127,14 +1186,14 @@ export function LeadForm({
           </label>
 
 
-          {lead && (
+          {/* INTENT */}
 
+          {lead && (
             <label className="block">
 
               <span className="field-label">
                 Intent
               </span>
-
 
               <select
                 className="input"
@@ -1167,16 +1226,16 @@ export function LeadForm({
               </select>
 
             </label>
-
           )}
 
+
+          {/* CONTACT CHANNEL */}
 
           <label className="block">
 
             <span className="field-label">
               Current contact channel
             </span>
-
 
             <select
               className="input"
@@ -1194,14 +1253,12 @@ export function LeadForm({
                     label,
                   ]
                 ) => (
-
                   <option
                     key={value}
                     value={value}
                   >
                     {label}
                   </option>
-
                 )
               )}
 
@@ -1219,7 +1276,6 @@ export function LeadForm({
       =================================================== */}
 
       {!lead && (
-
         <section className="card-pad">
 
           <div className="eyebrow">
@@ -1231,21 +1287,13 @@ export function LeadForm({
           </div>
 
 
-          <div
-            className="
-              mt-5
-              grid
-              gap-4
-              md:grid-cols-2
-            "
-          >
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
 
             <label className="block">
 
               <span className="field-label">
                 Lead created through
               </span>
-
 
               <select
                 className="input"
@@ -1260,14 +1308,12 @@ export function LeadForm({
                       label,
                     ]
                   ) => (
-
                     <option
                       key={value}
                       value={value}
                     >
                       {label}
                     </option>
-
                   )
                 )}
 
@@ -1299,12 +1345,11 @@ export function LeadForm({
           </div>
 
         </section>
-
       )}
 
 
       {/* ===================================================
-          INTERNAL
+          INTERNAL CONTEXT
       =================================================== */}
 
       <section className="card-pad">
@@ -1319,20 +1364,14 @@ export function LeadForm({
 
 
         {lead && (
-
           <label className="mt-5 block">
 
             <span className="field-label">
               CRM summary
             </span>
 
-
             <textarea
-              className="
-                input
-                min-h-28
-                resize-y
-              "
+              className="input min-h-28 resize-y"
               name="summary"
               defaultValue={
                 lead.summary
@@ -1340,7 +1379,6 @@ export function LeadForm({
             />
 
           </label>
-
         )}
 
 
@@ -1350,13 +1388,8 @@ export function LeadForm({
             Internal notes
           </span>
 
-
           <textarea
-            className="
-              input
-              min-h-28
-              resize-y
-            "
+            className="input min-h-28 resize-y"
             name="notes"
             defaultValue={
               lead?.notes
@@ -1385,7 +1418,6 @@ export function LeadForm({
       </div>
 
     </form>
-
   );
 }
 
@@ -1403,46 +1435,19 @@ function BatchInfo({
   label: string;
   value: string;
 }) {
-
   return (
+    <div className="rounded-xl bg-white p-3">
 
-    <div
-      className="
-        rounded-xl
-        bg-white
-        p-3
-      "
-    >
-
-      <div
-        className="
-          flex
-          items-center
-          gap-2
-          text-xs
-          font-semibold
-          text-slate-400
-        "
-      >
+      <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
         {icon}
-
         {label}
       </div>
 
-
-      <div
-        className="
-          mt-1.5
-          text-sm
-          font-bold
-          text-slate-800
-        "
-      >
+      <div className="mt-1.5 text-sm font-bold text-slate-800">
         {value}
       </div>
 
     </div>
-
   );
 }
 
@@ -1470,15 +1475,12 @@ function Field({
   disabled?: boolean;
   note?: string;
 }) {
-
   return (
-
     <label className="block">
 
       <span className="field-label">
         {label}
       </span>
-
 
       <input
         className="input"
@@ -1498,23 +1500,12 @@ function Field({
         }
       />
 
-
       {note && (
-
-        <span
-          className="
-            mt-1
-            block
-            text-xs
-            text-slate-400
-          "
-        >
+        <span className="mt-1 block text-xs text-slate-400">
           {note}
         </span>
-
       )}
 
     </label>
-
   );
 }

@@ -54,6 +54,7 @@ export type CourseBatchOption = {
 };
 
 
+
 /*
  * Extended lead data used by the Lead Detail page.
  * These fields come from the new CRM enrichment columns.
@@ -65,6 +66,8 @@ export type EnrichedLeadDetail =
 
     potentialValue?: number;
     potentialCurrency?: string;
+
+    potentialValueSource?: string;
 
     geoCountry?: string;
     geoRegion?: string;
@@ -957,26 +960,51 @@ export async function getLead(
        PERSON
     ----------------------------------------------------- */
 
-    firstName:
-      row.first_name ??
-      undefined,
+    /* ---------------------------------------------------------
+   PERSON
+--------------------------------------------------------- */
 
-    lastName:
-      row.last_name ??
-      undefined,
+firstName:
+  row.first_name ??
+  undefined,
+
+lastName:
+  row.last_name ??
+  undefined,
 
 
-    /* -----------------------------------------------------
-       COURSE
-    ----------------------------------------------------- */
+/* ---------------------------------------------------------
+   COURSE
+--------------------------------------------------------- */
 
-    interestedCourseId:
-      row.interested_course_id ??
-      undefined,
+interestedCourseId:
+  row.interested_course_id ??
+  undefined,
 
-    preferredBatchId:
-      row.preferred_batch_id ??
-      undefined,
+preferredBatchId:
+  row.preferred_batch_id ??
+  undefined,
+
+
+
+
+/* ---------------------------------------------------------
+   REVENUE FORECAST
+--------------------------------------------------------- */
+
+potentialValue:
+  row.potential_value == null
+    ? undefined
+    : Number(
+        row.potential_value
+      ),
+
+
+potentialValueSource:
+  row.potential_value_source ??
+  undefined,
+
+
 
 
     /* -----------------------------------------------------
@@ -1047,11 +1075,6 @@ export async function getLead(
     currency:
       potentialCurrency,
 
-    potentialValue:
-      potentialValue,
-
-    potentialCurrency:
-      potentialCurrency,
 
 
     /* -----------------------------------------------------

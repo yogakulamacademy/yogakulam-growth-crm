@@ -22,70 +22,647 @@ function safeChannel(value: string | null): Channel {
   return allowedChannels.includes(value as Channel) ? (value as Channel) : 'other';
 }
 
-export async function createLeadAction(formData: FormData) {
-  if (useMockData) redirect('/leads?notice=mock-create');
-  const firstName = textValue(formData, 'first_name');
-  if (!firstName) redirect('/leads/new?error=First%20name%20is%20required');
+function numberValue(formData: FormData, key: string) {
+  const raw = textValue(formData, key);
 
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc('create_crm_lead', {
-    p_first_name: firstName,
-    p_last_name: textValue(formData, 'last_name'),
-    p_email: textValue(formData, 'email'),
-    p_phone: textValue(formData, 'phone'),
-    p_course_id: textValue(formData, 'course_id'),
-    p_preferred_batch_id: textValue(formData, 'preferred_batch_id'),
-    p_preferred_location: textValue(formData, 'preferred_location'),
-    p_preferred_month: monthDate(textValue(formData, 'preferred_month')),
-    p_preferred_mode: textValue(formData, 'preferred_mode'),
-    p_country: textValue(formData, 'country'),
-    p_timezone: textValue(formData, 'timezone'),
-    p_lead_creation_channel: safeChannel(textValue(formData, 'lead_creation_channel')),
-    p_current_contact_channel: safeChannel(textValue(formData, 'current_contact_channel')),
-    p_first_touch_source: textValue(formData, 'first_touch_source'),
-    p_first_touch_medium: textValue(formData, 'first_touch_medium'),
-    p_first_touch_campaign: textValue(formData, 'first_touch_campaign'),
-    p_notes: textValue(formData, 'notes'),
-  });
+  if (raw === null) {
+    return null;
+  }
 
-  if (error) redirect(`/leads/new?error=${encodeURIComponent(error.message)}`);
-  const id = Array.isArray(data) ? data[0]?.id : (data as any)?.id;
-  revalidatePath('/leads');
-  revalidatePath('/dashboard');
-  redirect(id ? `/leads/${id}` : '/leads');
+  const value = Number(raw);
+
+  return Number.isFinite(value)
+    ? value
+    : null;
 }
 
-export async function updateLeadAction(leadId: string, formData: FormData) {
-  if (useMockData) redirect(`/leads/${leadId}?notice=mock-update`);
-  const intentRaw = textValue(formData, 'intent');
-  const intent: IntentLevel = allowedIntents.includes(intentRaw as IntentLevel) ? (intentRaw as IntentLevel) : 'unknown';
-  const channel = safeChannel(textValue(formData, 'current_contact_channel'));
-  const firstName = textValue(formData, 'first_name');
-  const lastName = textValue(formData, 'last_name');
+function currencyValue(formData: FormData) {
+  const value = (
+    textValue(formData, 'potential_currency') ??
+    ''
+  ).toUpperCase();
 
-  const supabase = await createClient();
-  const { error } = await supabase.from('leads').update({
-    first_name: firstName,
-    last_name: lastName,
-    display_name: [firstName, lastName].filter(Boolean).join(' ') || null,
-    interested_course_id: textValue(formData, 'course_id'),
-    preferred_batch_id: textValue(formData, 'preferred_batch_id'),
-    preferred_location: textValue(formData, 'preferred_location'),
-    preferred_month: monthDate(textValue(formData, 'preferred_month')),
-    preferred_mode: textValue(formData, 'preferred_mode'),
-    country: textValue(formData, 'country'),
-    timezone: textValue(formData, 'timezone'),
-    current_contact_channel: channel,
-    intent,
-    summary: textValue(formData, 'summary'),
-    notes: textValue(formData, 'notes'),
-  }).eq('id', leadId);
+  return ['USD', 'INR'].includes(value)
+    ? value
+    : null;
+}
 
-  if (error) redirect(`/leads/${leadId}/edit?error=${encodeURIComponent(error.message)}`);
-  revalidatePath(`/leads/${leadId}`);
-  revalidatePath('/leads');
-  revalidatePath('/dashboard');
-  redirect(`/leads/${leadId}?notice=updated`);
+
+export async function createLeadAction(formData: FormData) {
+  if (useMockData) {
+    redirect('/leads?notice=mock-create');
+  }
+
+  const firstName =
+    textValue(
+      formData,
+      'first_name'
+    );
+
+  if (!firstName) {
+    redirect(
+      '/leads/new?error=First%20name%20is%20required'
+    );
+  }
+
+
+  const potentialMode =
+    textValue(
+      formData,
+      'potential_value_mode'
+    ) === 'manual'
+      ? 'manual'
+      : 'batch_default';
+
+
+  const manualPotentialValue =
+    numberValue(
+      formData,
+      'potential_value'
+    );
+
+
+  const manualCurrency =
+    currencyValue(
+      formData
+    );
+
+
+  /*
+   * Validate manual override.
+   */
+  if (
+    potentialMode === 'manual' &&
+    (
+      manualPotentialValue === null ||
+      manualPotentialValue < 0
+    )
+  ) {
+
+    redirect(
+      '/leads/new?error=' +
+      encodeURIComponent(
+        'Enter a valid potential value.'
+      )
+    );
+
+  }
+
+
+  if (
+    potentialMode === 'manual' &&
+    !manualCurrency
+  ) {
+
+    redirect(
+      '/leads/new?error=' +
+      encodeURIComponent(
+        'Select INR or USD for the potential value.'
+      )
+    );
+
+  }
+
+
+  const supabase =
+    await createClient();
+
+
+  /*
+   * Create the lead normally first.
+   *
+   * preferred_batch_id will activate the
+   * database trigger and set the batch value.
+   */
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'create_crm_lead',
+    {
+
+      p_first_name:
+        firstName,
+
+      p_last_name:
+        textValue(
+          formData,
+          'last_name'
+        ),
+
+      p_email:
+        textValue(
+          formData,
+          'email'
+        ),
+
+      p_phone:
+        textValue(
+          formData,
+          'phone'
+        ),
+
+      p_course_id:
+        textValue(
+          formData,
+          'course_id'
+        ),
+
+      p_preferred_batch_id:
+        textValue(
+          formData,
+          'preferred_batch_id'
+        ),
+
+      p_preferred_location:
+        textValue(
+          formData,
+          'preferred_location'
+        ),
+
+      p_preferred_month:
+        monthDate(
+          textValue(
+            formData,
+            'preferred_month'
+          )
+        ),
+
+      p_preferred_mode:
+        textValue(
+          formData,
+          'preferred_mode'
+        ),
+
+      p_country:
+        textValue(
+          formData,
+          'country'
+        ),
+
+      p_timezone:
+        textValue(
+          formData,
+          'timezone'
+        ),
+
+      p_lead_creation_channel:
+        safeChannel(
+          textValue(
+            formData,
+            'lead_creation_channel'
+          )
+        ),
+
+      p_current_contact_channel:
+        safeChannel(
+          textValue(
+            formData,
+            'current_contact_channel'
+          )
+        ),
+
+      p_first_touch_source:
+        textValue(
+          formData,
+          'first_touch_source'
+        ),
+
+      p_first_touch_medium:
+        textValue(
+          formData,
+          'first_touch_medium'
+        ),
+
+      p_first_touch_campaign:
+        textValue(
+          formData,
+          'first_touch_campaign'
+        ),
+
+      p_notes:
+        textValue(
+          formData,
+          'notes'
+        ),
+
+    }
+  );
+
+
+  if (error) {
+
+    redirect(
+      `/leads/new?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+
+  }
+
+
+  const id =
+    Array.isArray(data)
+      ? data[0]?.id
+      : (data as any)?.id;
+
+
+  /*
+   * Manual override happens AFTER lead creation.
+   *
+   * That means the DB trigger can first apply
+   * the batch default, then we intentionally
+   * replace it with the admissions override.
+   */
+  if (
+    id &&
+    potentialMode === 'manual'
+  ) {
+
+    const {
+      error: valueError,
+    } = await supabase
+      .from('leads')
+      .update({
+
+        potential_value:
+          manualPotentialValue,
+
+        potential_currency:
+          manualCurrency,
+
+        potential_value_source:
+          'manual',
+
+      })
+      .eq(
+        'id',
+        id
+      );
+
+
+    if (valueError) {
+
+      redirect(
+        `/leads/${id}/edit?error=${encodeURIComponent(
+          valueError.message
+        )}`
+      );
+
+    }
+
+  }
+
+
+  revalidatePath(
+    '/leads'
+  );
+
+  revalidatePath(
+    '/dashboard'
+  );
+
+  revalidatePath(
+    '/revenue'
+  );
+
+
+  redirect(
+    id
+      ? `/leads/${id}`
+      : '/leads'
+  );
+}
+
+export async function updateLeadAction(
+  leadId: string,
+  formData: FormData
+) {
+
+  if (useMockData) {
+
+    redirect(
+      `/leads/${leadId}?notice=mock-update`
+    );
+
+  }
+
+
+  const intentRaw =
+    textValue(
+      formData,
+      'intent'
+    );
+
+
+  const intent: IntentLevel =
+    allowedIntents.includes(
+      intentRaw as IntentLevel
+    )
+      ? (
+          intentRaw as IntentLevel
+        )
+      : 'unknown';
+
+
+  const channel =
+    safeChannel(
+      textValue(
+        formData,
+        'current_contact_channel'
+      )
+    );
+
+
+  const firstName =
+    textValue(
+      formData,
+      'first_name'
+    );
+
+
+  const lastName =
+    textValue(
+      formData,
+      'last_name'
+    );
+
+
+  const preferredBatchId =
+    textValue(
+      formData,
+      'preferred_batch_id'
+    );
+
+
+  /*
+   * Potential value control.
+   */
+  const potentialMode =
+    textValue(
+      formData,
+      'potential_value_mode'
+    ) === 'manual'
+      ? 'manual'
+      : 'batch_default';
+
+
+  const manualPotentialValue =
+    numberValue(
+      formData,
+      'potential_value'
+    );
+
+
+  const manualCurrency =
+    currencyValue(
+      formData
+    );
+
+
+  /*
+   * Validate manual override.
+   */
+  if (
+    potentialMode === 'manual' &&
+    (
+      manualPotentialValue === null ||
+      manualPotentialValue < 0
+    )
+  ) {
+
+    redirect(
+      `/leads/${leadId}/edit?error=${encodeURIComponent(
+        'Enter a valid potential value.'
+      )}`
+    );
+
+  }
+
+
+  if (
+    potentialMode === 'manual' &&
+    !manualCurrency
+  ) {
+
+    redirect(
+      `/leads/${leadId}/edit?error=${encodeURIComponent(
+        'Select INR or USD for the potential value.'
+      )}`
+    );
+
+  }
+
+
+  /*
+   * Decide which potential-value fields
+   * should be written.
+   */
+  let potentialFields: {
+    potential_value:
+      number | null;
+
+    potential_currency:
+      string | null;
+
+    potential_value_source:
+      string | null;
+  };
+
+
+  if (
+    potentialMode === 'manual'
+  ) {
+
+    /*
+     * Protect this value from future
+     * batch-default updates.
+     */
+    potentialFields = {
+
+      potential_value:
+        manualPotentialValue,
+
+      potential_currency:
+        manualCurrency,
+
+      potential_value_source:
+        'manual',
+
+    };
+
+  } else if (
+    preferredBatchId
+  ) {
+
+    /*
+     * Clear the existing manual value.
+     *
+     * The BEFORE UPDATE trigger will detect
+     * batch_default and refill these values
+     * from course_batches.
+     */
+    potentialFields = {
+
+      potential_value:
+        null,
+
+      potential_currency:
+        null,
+
+      potential_value_source:
+        'batch_default',
+
+    };
+
+  } else {
+
+    /*
+     * No batch and no manual value.
+     */
+    potentialFields = {
+
+      potential_value:
+        null,
+
+      potential_currency:
+        null,
+
+      potential_value_source:
+        null,
+
+    };
+
+  }
+
+
+  const supabase =
+    await createClient();
+
+
+  const {
+    error,
+  } = await supabase
+    .from('leads')
+    .update({
+
+      first_name:
+        firstName,
+
+      last_name:
+        lastName,
+
+      display_name:
+        [
+          firstName,
+          lastName,
+        ]
+          .filter(Boolean)
+          .join(' ') ||
+        null,
+
+      interested_course_id:
+        textValue(
+          formData,
+          'course_id'
+        ),
+
+      preferred_batch_id:
+        preferredBatchId,
+
+      preferred_location:
+        textValue(
+          formData,
+          'preferred_location'
+        ),
+
+      preferred_month:
+        monthDate(
+          textValue(
+            formData,
+            'preferred_month'
+          )
+        ),
+
+      preferred_mode:
+        textValue(
+          formData,
+          'preferred_mode'
+        ),
+
+      country:
+        textValue(
+          formData,
+          'country'
+        ),
+
+      timezone:
+        textValue(
+          formData,
+          'timezone'
+        ),
+
+      current_contact_channel:
+        channel,
+
+      intent,
+
+      summary:
+        textValue(
+          formData,
+          'summary'
+        ),
+
+      notes:
+        textValue(
+          formData,
+          'notes'
+        ),
+
+      ...potentialFields,
+
+    })
+    .eq(
+      'id',
+      leadId
+    );
+
+
+  if (error) {
+
+    redirect(
+      `/leads/${leadId}/edit?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+
+  }
+
+
+  revalidatePath(
+    `/leads/${leadId}`
+  );
+
+  revalidatePath(
+    `/leads/${leadId}/edit`
+  );
+
+  revalidatePath(
+    '/leads'
+  );
+
+  revalidatePath(
+    '/dashboard'
+  );
+
+  revalidatePath(
+    '/revenue'
+  );
+
+
+  redirect(
+    `/leads/${leadId}?notice=updated`
+  );
 }
 
 export async function updateLeadStageAction(leadId: string, formData: FormData) {
