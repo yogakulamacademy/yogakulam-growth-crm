@@ -17,6 +17,7 @@ import {
   Sparkles,
   Tags,
   Target,
+  CircleDollarSign,
 } from 'lucide-react';
 import { ReactNode, useState } from 'react';
 import { signOutAction } from '@/app/actions/auth';
@@ -25,14 +26,25 @@ import { ThemeToggle } from '@/components/theme-toggle';
 
 const nav = [
   { href: '/dashboard', label: 'Dashboard', icon: Gauge },
+
   { href: '/leads', label: 'Leads', icon: ContactRound },
+
   { href: '/pipeline', label: 'Pipeline', icon: Boxes },
+
   { href: '/conversations', label: 'Conversations', icon: MessageSquareText },
+
   { href: '/follow-ups', label: 'Follow-ups', icon: ListTodo },
+
   { href: '/campaigns', label: 'Campaigns', icon: Target },
+
   { href: '/attribution', label: 'Attribution', icon: LineChart },
+
   { href: '/tracking', label: 'Tracking', icon: Tags },
+
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+
+  { href: '/revenue', label: 'Revenue Forecast', icon: CircleDollarSign },
+
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
