@@ -11,9 +11,11 @@ import {
   ContactRound,
   FileSearch,
   Gauge,
+  GitBranch,
   LineChart,
   ListTodo,
   MessageSquareText,
+  RefreshCw,
   Search,
   Settings,
   Sparkles,
@@ -43,6 +45,10 @@ const nav = [
   { href: '/tracking', label: 'Tracking', icon: Tags },
 
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+
+  { href: '/funnel', label: 'Funnel', icon: GitBranch },
+
+  { href: '/re-engaged', label: 'Re-engaged Leads', icon: RefreshCw },
 
   { href: '/seo', label: 'SEO', icon: FileSearch },
 
