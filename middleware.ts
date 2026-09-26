@@ -18,16 +18,22 @@ const PUBLIC_EXACT_PATHS =
 function isPublicPath(
   pathname: string
 ) {
+  const normalizedPath =
+    pathname.length > 1 &&
+    pathname.endsWith('/')
+      ? pathname.slice(0, -1)
+      : pathname;
+
   if (
     PUBLIC_EXACT_PATHS.has(
-      pathname
+      normalizedPath
     )
   ) {
     return true;
   }
 
   if (
-    pathname.startsWith(
+    normalizedPath.startsWith(
       '/api/tracking/'
     )
   ) {
