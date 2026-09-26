@@ -19,6 +19,16 @@ export const maxDuration =
   60;
 
 
+type SyncRange = {
+  startDate: string;
+  endDate: string;
+};
+
+
+/* =========================================================
+   AUTHORIZATION
+========================================================= */
+
 function isAuthorized(
   request: NextRequest
 ) {
@@ -43,11 +53,13 @@ function isAuthorized(
           Boolean(value)
       );
 
+
   if (secrets.length === 0) {
     throw new Error(
-      'GA4_SYNC_SECRET is not configured.'
+      'GA4_SYNC_SECRET or CRON_SECRET is not configured.'
     );
   }
+
 
   return secrets.some(
     (secret) =>
@@ -56,6 +68,10 @@ function isAuthorized(
   );
 }
 
+
+/* =========================================================
+   DATE HELPERS
+========================================================= */
 
 function isoDate(
   date: Date
@@ -69,9 +85,16 @@ function isoDate(
 }
 
 
-function defaultRange() {
+function defaultRange(): SyncRange {
+  /*
+   * Re-sync the latest 7 completed UTC days.
+   *
+   * GA4 can revise recent historical data, so using a rolling
+   * 7-day window is safer than importing only yesterday.
+   */
   const now =
     new Date();
+
 
   const end =
     new Date(
@@ -82,6 +105,7 @@ function defaultRange() {
       )
     );
 
+
   const start =
     new Date(
       Date.UTC(
@@ -91,11 +115,17 @@ function defaultRange() {
       )
     );
 
+
   return {
     startDate:
-      isoDate(start),
+      isoDate(
+        start
+      ),
+
     endDate:
-      isoDate(end),
+      isoDate(
+        end
+      ),
   };
 }
 
@@ -104,7 +134,9 @@ function isIsoDate(
   value: string
 ) {
   return /^\d{4}-\d{2}-\d{2}$/
-    .test(value);
+    .test(
+      value
+    );
 }
 
 
@@ -113,13 +145,18 @@ function validateRange(
   endDate: string
 ) {
   if (
-    !isIsoDate(startDate) ||
-    !isIsoDate(endDate)
+    !isIsoDate(
+      startDate
+    ) ||
+    !isIsoDate(
+      endDate
+    )
   ) {
     throw new Error(
       'startDate and endDate must use YYYY-MM-DD.'
     );
   }
+
 
   const start =
     new Date(
@@ -130,6 +167,7 @@ function validateRange(
     new Date(
       `${endDate}T00:00:00Z`
     );
+
 
   if (
     Number.isNaN(
@@ -144,11 +182,16 @@ function validateRange(
     );
   }
 
-  if (start > end) {
+
+  if (
+    start >
+    end
+  ) {
     throw new Error(
       'startDate must be before or equal to endDate.'
     );
   }
+
 
   const days =
     Math.floor(
@@ -159,7 +202,10 @@ function validateRange(
       86400000
     ) + 1;
 
-  if (days > 93) {
+
+  if (
+    days > 93
+  ) {
     throw new Error(
       'A single GA4 sync is limited to 93 days.'
     );
@@ -167,17 +213,214 @@ function validateRange(
 }
 
 
-export async function POST(
+/* =========================================================
+   SHARED SYNC RUNNER
+========================================================= */
+
+async function executeSync(
+  range: SyncRange
+) {
+  const {
+    startDate,
+    endDate,
+  } =
+    range;
+
+
+  validateRange(
+    startDate,
+    endDate
+  );
+
+
+  const propertyId =
+    process.env
+      .GA4_PROPERTY_ID
+      ?.trim();
+
+
+  if (
+    !propertyId
+  ) {
+    throw new Error(
+      'GA4_PROPERTY_ID is not configured.'
+    );
+  }
+
+
+  const supabase =
+    createGa4AdminClient();
+
+
+  const {
+    data:
+      syncRun,
+
+    error:
+      insertError,
+  } =
+    await supabase
+      .from(
+        'ga4_sync_runs'
+      )
+      .insert({
+        property_id:
+          propertyId,
+
+        status:
+          'running',
+
+        from_date:
+          startDate,
+
+        to_date:
+          endDate,
+      })
+      .select(
+        'id'
+      )
+      .single();
+
+
+  if (
+    insertError ||
+    !syncRun
+  ) {
+    throw new Error(
+      `Unable to create GA4 sync log: ${
+        insertError?.message ||
+        'Unknown error'
+      }`
+    );
+  }
+
+
+  try {
+
+    const counts =
+      await syncGa4ToSupabase({
+        startDate,
+        endDate,
+      });
+
+
+    const {
+      error:
+        updateError,
+    } =
+      await supabase
+        .from(
+          'ga4_sync_runs'
+        )
+        .update({
+          status:
+            'completed',
+
+          overview_rows:
+            counts.overviewRows,
+
+          source_rows:
+            counts.sourceRows,
+
+          landing_page_rows:
+            counts.landingPageRows,
+
+          campaign_rows:
+            counts.campaignRows,
+
+          country_rows:
+            counts.countryRows,
+
+          total_rows:
+            counts.totalRows,
+
+          completed_at:
+            new Date()
+              .toISOString(),
+
+          error_message:
+            null,
+        })
+        .eq(
+          'id',
+          syncRun.id
+        );
+
+
+    if (
+      updateError
+    ) {
+      throw new Error(
+        `GA4 data synced, but the sync log could not be finalized: ${updateError.message}`
+      );
+    }
+
+
+    return {
+      ok: true,
+      propertyId,
+      startDate,
+      endDate,
+      counts,
+    };
+
+
+  } catch (
+    error
+  ) {
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown GA4 sync error';
+
+
+    await supabase
+      .from(
+        'ga4_sync_runs'
+      )
+      .update({
+        status:
+          'failed',
+
+        completed_at:
+          new Date()
+            .toISOString(),
+
+        error_message:
+          message,
+      })
+      .eq(
+        'id',
+        syncRun.id
+      );
+
+
+    throw error;
+  }
+}
+
+
+/* =========================================================
+   GET
+   Used automatically by Vercel Cron.
+========================================================= */
+
+export async function GET(
   request: NextRequest
 ) {
   try {
+
     if (
-      !isAuthorized(request)
+      !isAuthorized(
+        request
+      )
     ) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'Unauthorized',
+          error:
+            'Unauthorized',
         },
         {
           status: 401,
@@ -185,8 +428,81 @@ export async function POST(
       );
     }
 
+
+    const result =
+      await executeSync(
+        defaultRange()
+      );
+
+
+    return NextResponse.json({
+      ...result,
+      trigger:
+        'cron',
+    });
+
+
+  } catch (
+    error
+  ) {
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown GA4 sync error';
+
+
+    console.error(
+      'GA4 cron sync failed:',
+      error
+    );
+
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          message,
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+
+
+/* =========================================================
+   POST
+   Preserves your existing manual sync endpoint.
+========================================================= */
+
+export async function POST(
+  request: NextRequest
+) {
+  try {
+
+    if (
+      !isAuthorized(
+        request
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Unauthorized',
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+
     const defaults =
       defaultRange();
+
 
     let body:
       {
@@ -194,171 +510,56 @@ export async function POST(
         endDate?: string;
       } = {};
 
+
     try {
       body =
         await request.json();
+
     } catch {
       body = {};
     }
 
-    const startDate =
-      body.startDate ||
-      defaults.startDate;
 
-    const endDate =
-      body.endDate ||
-      defaults.endDate;
+    const result =
+      await executeSync({
+        startDate:
+          body.startDate ||
+          defaults.startDate,
 
-    validateRange(
-      startDate,
-      endDate
-    );
-
-    const propertyId =
-      process.env
-        .GA4_PROPERTY_ID
-        ?.trim();
-
-    if (!propertyId) {
-      throw new Error(
-        'GA4_PROPERTY_ID is not configured.'
-      );
-    }
-
-    const supabase =
-      createGa4AdminClient();
-
-    const {
-      data: syncRun,
-      error: insertError,
-    } =
-      await supabase
-        .from(
-          'ga4_sync_runs'
-        )
-        .insert({
-          property_id:
-            propertyId,
-          status:
-            'running',
-          from_date:
-            startDate,
-          to_date:
-            endDate,
-        })
-        .select(
-          'id'
-        )
-        .single();
-
-    if (
-      insertError ||
-      !syncRun
-    ) {
-      throw new Error(
-        `Unable to create GA4 sync log: ${
-          insertError?.message ||
-          'Unknown error'
-        }`
-      );
-    }
-
-    try {
-      const counts =
-        await syncGa4ToSupabase({
-          startDate,
-          endDate,
-        });
-
-      const {
-        error: updateError,
-      } =
-        await supabase
-          .from(
-            'ga4_sync_runs'
-          )
-          .update({
-            status:
-              'completed',
-            overview_rows:
-              counts.overviewRows,
-            source_rows:
-              counts.sourceRows,
-            landing_page_rows:
-              counts.landingPageRows,
-            campaign_rows:
-              counts.campaignRows,
-            country_rows:
-              counts.countryRows,
-            total_rows:
-              counts.totalRows,
-            completed_at:
-              new Date()
-                .toISOString(),
-            error_message:
-              null,
-          })
-          .eq(
-            'id',
-            syncRun.id
-          );
-
-      if (updateError) {
-        throw new Error(
-          `GA4 data synced, but the sync log could not be finalized: ${updateError.message}`
-        );
-      }
-
-      return NextResponse.json({
-        ok: true,
-        propertyId,
-        startDate,
-        endDate,
-        counts,
+        endDate:
+          body.endDate ||
+          defaults.endDate,
       });
 
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Unknown GA4 sync error';
 
-      await supabase
-        .from(
-          'ga4_sync_runs'
-        )
-        .update({
-          status:
-            'failed',
-          completed_at:
-            new Date()
-              .toISOString(),
-          error_message:
-            message,
-        })
-        .eq(
-          'id',
-          syncRun.id
-        );
+    return NextResponse.json({
+      ...result,
+      trigger:
+        'manual',
+    });
 
-      throw error;
-    }
 
-  } catch (error) {
+  } catch (
+    error
+  ) {
+
     const message =
       error instanceof Error
         ? error.message
         : 'Unknown GA4 sync error';
 
+
     console.error(
-      'GA4 sync failed:',
+      'GA4 manual sync failed:',
       error
     );
+
 
     return NextResponse.json(
       {
         ok: false,
-        error: message,
+        error:
+          message,
       },
       {
         status: 500,
