@@ -1,4 +1,7 @@
 import Link from 'next/link';
+
+import type { ReactNode } from 'react';
+
 import {
   ArrowRight,
   Banknote,
@@ -77,9 +80,50 @@ type LocationRow = {
 };
 
 
+type ActualRevenueRow = {
+  currency: string;
+  gross_received: number | string | null;
+  refunds: number | string | null;
+  actual_revenue: number | string | null;
+  successful_payments: number | string | null;
+  refund_transactions: number | string | null;
+};
+
+
+type ActualRevenueMonthlyRow = {
+  revenue_month: string;
+  currency: string;
+  gross_received: number | string | null;
+  refunds: number | string | null;
+  actual_revenue: number | string | null;
+  successful_payments: number | string | null;
+};
+
+
+type LeadRevenueStatusRow = {
+  lead_id: string;
+  lead_code: string;
+  lead_name: string | null;
+  current_stage: string;
+  potential_value: number | string | null;
+  currency: string | null;
+  gross_paid: number | string | null;
+  refunds: number | string | null;
+  net_paid: number | string | null;
+  outstanding_balance: number | string | null;
+  payment_status: string;
+};
+
+
+type OutstandingRevenueRow = {
+  currency: string;
+  leads_with_balance: number | string | null;
+  outstanding_revenue: number | string | null;
+};
+
+
 export default async function RevenuePage() {
   const supabase = await createClient();
-
 
   const [
     forecastResult,
@@ -87,6 +131,10 @@ export default async function RevenuePage() {
     monthlyResult,
     sourceResult,
     locationResult,
+    actualRevenueResult,
+    actualMonthlyResult,
+    leadRevenueStatusResult,
+    outstandingResult,
   ] = await Promise.all([
     supabase
       .from('v_revenue_forecast')
@@ -112,6 +160,25 @@ export default async function RevenuePage() {
 
     supabase
       .from('v_revenue_forecast_by_location')
+      .select('*'),
+
+    supabase
+      .from('v_actual_revenue_by_currency')
+      .select('*'),
+
+    supabase
+      .from('v_actual_revenue_monthly')
+      .select('*')
+      .order('revenue_month', {
+        ascending: true,
+      }),
+
+    supabase
+      .from('v_lead_revenue_status')
+      .select('*'),
+
+    supabase
+      .from('v_outstanding_revenue_by_currency')
       .select('*'),
   ]);
 
@@ -146,6 +213,30 @@ export default async function RevenuePage() {
     );
   }
 
+  if (actualRevenueResult.error) {
+    throw new Error(
+      `Unable to load actual revenue: ${actualRevenueResult.error.message}`
+    );
+  }
+
+  if (actualMonthlyResult.error) {
+    throw new Error(
+      `Unable to load monthly actual revenue: ${actualMonthlyResult.error.message}`
+    );
+  }
+
+  if (leadRevenueStatusResult.error) {
+    throw new Error(
+      `Unable to load lead payment status: ${leadRevenueStatusResult.error.message}`
+    );
+  }
+
+  if (outstandingResult.error) {
+    throw new Error(
+      `Unable to load outstanding revenue: ${outstandingResult.error.message}`
+    );
+  }
+
 
   const forecasts =
     (forecastResult.data ?? []) as ForecastRow[];
@@ -162,24 +253,83 @@ export default async function RevenuePage() {
   const locations =
     (locationResult.data ?? []) as LocationRow[];
 
+  const actualRevenue =
+    (actualRevenueResult.data ?? []) as ActualRevenueRow[];
+
+  const actualMonthly =
+    (actualMonthlyResult.data ?? []) as ActualRevenueMonthlyRow[];
+
+  const leadRevenueStatus =
+    (leadRevenueStatusResult.data ?? []) as LeadRevenueStatusRow[];
+
+  const outstanding =
+    (outstandingResult.data ?? []) as OutstandingRevenueRow[];
+
+
+  /*
+   * Payment data is kept separate from forecast values.
+   * A lead's actual revenue comes from paid payments minus refunds.
+   */
+  const paymentByLead =
+    new Map<string, LeadRevenueStatusRow>();
+
+  for (const row of leadRevenueStatus) {
+    paymentByLead.set(
+      row.lead_id,
+      row
+    );
+  }
+
+
+  const actualByCurrency =
+    new Map<string, ActualRevenueRow>();
+
+  for (const row of actualRevenue) {
+    actualByCurrency.set(
+      normalizeCurrency(row.currency),
+      row
+    );
+  }
+
+
+  const outstandingByCurrency =
+    new Map<string, OutstandingRevenueRow>();
+
+  for (const row of outstanding) {
+    outstandingByCurrency.set(
+      normalizeCurrency(row.currency),
+      row
+    );
+  }
+
 
   /*
    * Keep INR and USD independent.
-   *
-   * We should never add:
-   *
-   * ₹60,000 + $1,500
-   *
-   * until we add an FX conversion layer later.
+   * Never add ₹ and $ together until an FX layer exists.
    */
   const currencies = Array.from(
     new Set(
-      forecasts
-        .map((row) => row.currency)
-        .filter(Boolean)
-        .map((value) =>
-          String(value).toUpperCase()
-        )
+      [
+        ...forecasts.map(
+          (row) =>
+            normalizeCurrency(row.currency)
+        ),
+
+        ...actualRevenue.map(
+          (row) =>
+            normalizeCurrency(row.currency)
+        ),
+
+        ...outstanding.map(
+          (row) =>
+            normalizeCurrency(row.currency)
+        ),
+
+        ...actualMonthly.map(
+          (row) =>
+            normalizeCurrency(row.currency)
+        ),
+      ].filter(Boolean)
     )
   );
 
@@ -194,7 +344,7 @@ export default async function RevenuePage() {
 
 
   /*
-   * Open stages used for pipeline / opportunity metrics.
+   * Stages that are no longer open opportunities.
    */
   const closedStages = new Set([
     'enrolled',
@@ -204,177 +354,347 @@ export default async function RevenuePage() {
   ]);
 
 
-  const totalsByCurrency = currencies.map(
-  (currency) => {
+  function netPaidForLead(
+    leadId: string
+  ) {
+    return toNumber(
+      paymentByLead.get(
+        leadId
+      )?.net_paid
+    );
+  }
 
-    const rows = forecasts.filter(
-      (row) =>
-        String(
-          row.currency || ''
-        ).toUpperCase() === currency
+
+  function netPaidForForecastRows(
+    rows: ForecastRow[]
+  ) {
+    return sum(
+      rows.map(
+        (row) =>
+          netPaidForLead(
+            row.id
+          )
+      )
+    );
+  }
+
+
+  function netCollectedByStage(
+    stage: string,
+    currency: string
+  ) {
+    return netPaidForForecastRows(
+      forecasts.filter(
+        (row) =>
+          normalizeCurrency(
+            row.currency
+          ) === currency &&
+          row.current_stage === stage
+      )
+    );
+  }
+
+
+  function netCollectedByForecastMonth(
+    forecastMonth: string,
+    currency: string
+  ) {
+    return netPaidForForecastRows(
+      forecasts.filter(
+        (row) =>
+          normalizeCurrency(
+            row.currency
+          ) === currency &&
+          row.forecast_month === forecastMonth
+      )
+    );
+  }
+
+
+  function netCollectedBySource(
+    source: string,
+    currency: string
+  ) {
+    return netPaidForForecastRows(
+      forecasts.filter(
+        (row) =>
+          normalizeCurrency(
+            row.currency
+          ) === currency &&
+          (
+            row.first_touch_source ||
+            'Unknown'
+          ) === source
+      )
+    );
+  }
+
+
+  function netCollectedByLocation(
+    location: string,
+    currency: string
+  ) {
+    return netPaidForForecastRows(
+      forecasts.filter(
+        (row) =>
+          normalizeCurrency(
+            row.currency
+          ) === currency &&
+          (
+            row.preferred_location ||
+            'Unknown'
+          ) === location
+      )
+    );
+  }
+
+
+  const totalsByCurrency =
+    currencies.map(
+      (currency) => {
+
+        const rows =
+          forecasts.filter(
+            (row) =>
+              normalizeCurrency(
+                row.currency
+              ) === currency
+          );
+
+
+        const valuedRows =
+          rows.filter(
+            (row) =>
+              toNumber(
+                row.potential_value
+              ) > 0
+          );
+
+
+        const openRows =
+          valuedRows.filter(
+            (row) =>
+              !closedStages.has(
+                String(
+                  row.current_stage
+                )
+              )
+          );
+
+
+        const actual =
+          actualByCurrency.get(
+            currency
+          );
+
+
+        const balance =
+          outstandingByCurrency.get(
+            currency
+          );
+
+
+        return {
+          currency,
+
+          pipeline:
+            sum(
+              openRows.map(
+                (row) =>
+                  row.potential_value
+              )
+            ),
+
+          weighted:
+            sum(
+              openRows.map(
+                (row) =>
+                  row.weighted_value
+              )
+            ),
+
+          actual:
+            toNumber(
+              actual?.actual_revenue
+            ),
+
+          gross:
+            toNumber(
+              actual?.gross_received
+            ),
+
+          refunds:
+            toNumber(
+              actual?.refunds
+            ),
+
+          outstanding:
+            toNumber(
+              balance
+                ?.outstanding_revenue
+            ),
+
+          balanceLeads:
+            toNumber(
+              balance
+                ?.leads_with_balance
+            ),
+
+          successfulPayments:
+            toNumber(
+              actual
+                ?.successful_payments
+            ),
+
+          opportunities:
+            openRows.length,
+        };
+      }
     );
 
 
-    /*
-     * Only financially valued leads count
-     * as revenue opportunities.
-     */
-    const valuedRows = rows.filter(
-      (row) =>
-        toNumber(
-          row.potential_value
-        ) > 0
-    );
-
-
-    const openRows = valuedRows.filter(
+  const unvaluedLeads =
+    forecasts.filter(
       (row) =>
         !closedStages.has(
           String(
             row.current_stage
           )
-        )
-    );
-
-
-    return {
-
-      currency,
-
-      pipeline: sum(
-        openRows.map(
-          (row) =>
-            row.potential_value
-        )
-      ),
-
-      weighted: sum(
-        openRows.map(
-          (row) =>
-            row.weighted_value
-        )
-      ),
-
-      actual: sum(
-        valuedRows.map(
-          (row) =>
-            row.actual_revenue
-        )
-      ),
-
-      opportunities:
-        openRows.length,
-
-    };
-
-  }
-);
-
-
-const unvaluedLeads = forecasts.filter(
-  (row) =>
-    !closedStages.has(
-      String(
-        row.current_stage
-      )
-    ) &&
-    toNumber(
-      row.potential_value
-    ) <= 0
-).length;
-
-
-/* CURRENCY SUMMARY */
-
-{unvaluedLeads > 0 && (
-
-  <div
-    className="
-      mt-6
-      rounded-xl
-      border
-      border-amber-100
-      bg-amber-50
-      px-4
-      py-3
-    "
-  >
-
-    <div className="text-sm font-bold text-amber-800">
-      {unvaluedLeads} unvalued lead
-      {unvaluedLeads === 1 ? '' : 's'}
-    </div>
-
-    <div className="mt-1 text-xs text-amber-700">
-      These leads do not yet have a batch or potential value assigned,
-      so they are excluded from revenue forecasting.
-    </div>
-
-  </div>
-
-)}
-
-
-
-
-
-  const topOpportunities = [...forecasts]
-    .filter(
-      (row) =>
-        !closedStages.has(
-          String(row.current_stage)
         ) &&
-        toNumber(row.potential_value) > 0
-    )
-    .sort(
-      (a, b) =>
-        toNumber(b.weighted_value) -
-        toNumber(a.weighted_value)
-    )
-    .slice(0, 10);
+        toNumber(
+          row.potential_value
+        ) <= 0
+    ).length;
+
+
+  const topOpportunities =
+    [...forecasts]
+      .filter(
+        (row) =>
+          !closedStages.has(
+            String(
+              row.current_stage
+            )
+          ) &&
+          toNumber(
+            row.potential_value
+          ) > 0
+      )
+      .sort(
+        (a, b) =>
+          toNumber(
+            b.weighted_value
+          ) -
+          toNumber(
+            a.weighted_value
+          )
+      )
+      .slice(
+        0,
+        10
+      );
 
 
   const currentMonth =
     new Date()
       .toISOString()
-      .slice(0, 7);
+      .slice(
+        0,
+        7
+      );
 
 
   const closingThisMonth =
     forecasts
-      .filter((row) => {
-        if (!row.expected_close_date) {
-          return false;
-        }
+      .filter(
+        (row) => {
 
-        if (
-          closedStages.has(
-            String(row.current_stage)
-          )
-        ) {
-          return false;
-        }
+          if (
+            !row
+              .expected_close_date
+          ) {
+            return false;
+          }
 
-        return (
-          row.expected_close_date.slice(
-            0,
-            7
-          ) === currentMonth
-        );
-      })
+          if (
+            closedStages.has(
+              String(
+                row.current_stage
+              )
+            )
+          ) {
+            return false;
+          }
+
+          return (
+            row
+              .expected_close_date
+              .slice(
+                0,
+                7
+              ) === currentMonth
+          );
+        }
+      )
       .sort(
         (a, b) =>
-          toNumber(b.weighted_value) -
-          toNumber(a.weighted_value)
+          toNumber(
+            b.weighted_value
+          ) -
+          toNumber(
+            a.weighted_value
+          )
       );
+
+
+  const cashMonths =
+    actualMonthly.filter(
+      (row) =>
+        toNumber(
+          row.gross_received
+        ) > 0 ||
+        toNumber(
+          row.refunds
+        ) > 0 ||
+        toNumber(
+          row.actual_revenue
+        ) !== 0
+    );
 
 
   return (
     <>
       <PageHeader
         title="Revenue Forecast"
-        description="Pipeline value, weighted forecast and revenue intelligence from Yogakulam CRM leads."
+        description="Pipeline, weighted forecast, real payment revenue, refunds and outstanding balances from Yogakulam CRM."
       />
+
+
+      {unvaluedLeads > 0 && (
+        <div
+          className="
+            mt-6
+            rounded-xl
+            border
+            border-amber-100
+            bg-amber-50
+            px-4
+            py-3
+          "
+        >
+          <div className="text-sm font-bold text-amber-800">
+            {unvaluedLeads} unvalued lead
+            {unvaluedLeads === 1
+              ? ''
+              : 's'}
+          </div>
+
+          <div className="mt-1 text-xs text-amber-700">
+            These open leads do not yet have a batch or potential value assigned,
+            so they are excluded from revenue forecasting.
+          </div>
+        </div>
+      )}
 
 
       {/* ===================================================
@@ -382,107 +702,164 @@ const unvaluedLeads = forecasts.filter(
       =================================================== */}
 
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        {totalsByCurrency.map(
+          (group) => (
 
-        {totalsByCurrency.map((group) => (
+            <section
+              key={
+                group.currency
+              }
+              className="card-pad"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="eyebrow">
+                    {group.currency} Forecast
+                  </div>
 
-          <section
-            key={group.currency}
-            className="card-pad"
-          >
-
-            <div className="flex items-center justify-between">
-
-              <div>
-
-                <div className="eyebrow">
-                  {group.currency} Forecast
+                  <div className="section-title mt-1">
+                    Revenue overview
+                  </div>
                 </div>
 
-                <div className="section-title mt-1">
-                  Revenue overview
+                <div
+                  className="
+                    rounded-xl
+                    bg-slate-50
+                    px-3
+                    py-2
+                    text-sm
+                    font-bold
+                    text-slate-600
+                  "
+                >
+                  {group.currency}
                 </div>
-
               </div>
 
 
               <div
                 className="
-                  rounded-xl
-                  bg-slate-50
-                  px-3
-                  py-2
-                  text-sm
-                  font-bold
-                  text-slate-600
+                  mt-5
+                  grid
+                  gap-3
+                  sm:grid-cols-2
+                  xl:grid-cols-4
                 "
               >
-                {group.currency}
+                <MetricCard
+                  icon={
+                    <CircleDollarSign
+                      size={17}
+                    />
+                  }
+                  label="Open pipeline"
+                  value={
+                    formatMoney(
+                      group.pipeline,
+                      group.currency
+                    )
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <TrendingUp
+                      size={17}
+                    />
+                  }
+                  label="Weighted forecast"
+                  value={
+                    formatMoney(
+                      group.weighted,
+                      group.currency
+                    )
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <Banknote
+                      size={17}
+                    />
+                  }
+                  label="Actual revenue"
+                  value={
+                    formatMoney(
+                      group.actual,
+                      group.currency
+                    )
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <Target
+                      size={17}
+                    />
+                  }
+                  label="Outstanding balance"
+                  value={
+                    formatMoney(
+                      group.outstanding,
+                      group.currency
+                    )
+                  }
+                  sub={
+                    `${group.balanceLeads} lead${group.balanceLeads === 1 ? '' : 's'} with balance`
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <CircleDollarSign
+                      size={17}
+                    />
+                  }
+                  label="Gross received"
+                  value={
+                    formatMoney(
+                      group.gross,
+                      group.currency
+                    )
+                  }
+                  sub={
+                    `${group.successfulPayments} successful payment${group.successfulPayments === 1 ? '' : 's'}`
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <Banknote
+                      size={17}
+                    />
+                  }
+                  label="Refunds"
+                  value={
+                    formatMoney(
+                      group.refunds,
+                      group.currency
+                    )
+                  }
+                />
+
+                <MetricCard
+                  icon={
+                    <Users
+                      size={17}
+                    />
+                  }
+                  label="Open opportunities"
+                  value={
+                    String(
+                      group.opportunities
+                    )
+                  }
+                />
               </div>
-
-            </div>
-
-
-            <div
-              className="
-                mt-5
-                grid
-                gap-3
-                sm:grid-cols-2
-              "
-            >
-
-              <MetricCard
-                icon={
-                  <CircleDollarSign size={17} />
-                }
-                label="Open pipeline"
-                value={formatMoney(
-                  group.pipeline,
-                  group.currency
-                )}
-              />
-
-
-              <MetricCard
-                icon={
-                  <TrendingUp size={17} />
-                }
-                label="Weighted forecast"
-                value={formatMoney(
-                  group.weighted,
-                  group.currency
-                )}
-              />
-
-
-              <MetricCard
-                icon={
-                  <Banknote size={17} />
-                }
-                label="Actual revenue"
-                value={formatMoney(
-                  group.actual,
-                  group.currency
-                )}
-              />
-
-
-              <MetricCard
-                icon={
-                  <Target size={17} />
-                }
-                label="Open opportunities"
-                value={String(
-                  group.opportunities
-                )}
-              />
-
-            </div>
-
-          </section>
-
-        ))}
-
+            </section>
+          )
+        )}
       </div>
 
 
@@ -491,9 +868,7 @@ const unvaluedLeads = forecasts.filter(
       =================================================== */}
 
       <section className="card-pad mt-4">
-
         <div>
-
           <div className="eyebrow">
             Pipeline
           </div>
@@ -501,18 +876,13 @@ const unvaluedLeads = forecasts.filter(
           <div className="section-title mt-1">
             Forecast by stage
           </div>
-
         </div>
 
 
         <div className="mt-5 overflow-x-auto">
-
           <table className="min-w-full text-left text-sm">
-
             <thead>
-
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-
                 <th className="px-3 py-3">
                   Stage
                 </th>
@@ -534,30 +904,40 @@ const unvaluedLeads = forecasts.filter(
                 </th>
 
                 <th className="px-3 py-3 text-right">
-                  Revenue
+                  Net collected
                 </th>
-
               </tr>
-
             </thead>
 
 
             <tbody>
-
               {stages
-              .filter(
-                (row) =>
-                  toNumber(
-                    row.pipeline_value
-                  ) > 0 ||
-                  toNumber(
-                    row.weighted_forecast
-                  ) > 0 ||
-                  toNumber(
-                    row.actual_revenue
-                  ) > 0
-              )
-              .sort(
+                .filter(
+                  (row) => {
+
+                    const currency =
+                      normalizeCurrency(
+                        row.currency
+                      );
+
+                    const collected =
+                      netCollectedByStage(
+                        row.current_stage,
+                        currency
+                      );
+
+                    return (
+                      toNumber(
+                        row.pipeline_value
+                      ) > 0 ||
+                      toNumber(
+                        row.weighted_forecast
+                      ) > 0 ||
+                      collected !== 0
+                    );
+                  }
+                )
+                .sort(
                   (a, b) =>
                     toNumber(
                       b.weighted_forecast
@@ -566,60 +946,70 @@ const unvaluedLeads = forecasts.filter(
                       a.weighted_forecast
                     )
                 )
-                .map((row) => (
+                .map(
+                  (row) => {
 
-                  <tr
-                    key={`${row.currency}-${row.current_stage}`}
-                    className="border-b border-slate-50 last:border-0"
-                  >
-
-                    <td className="px-3 py-3 font-semibold capitalize text-slate-700">
-                      {pretty(
-                        row.current_stage
-                      )}
-                    </td>
-
-                    <td className="px-3 py-3 text-slate-500">
-                      {row.currency}
-                    </td>
-
-                    <td className="px-3 py-3 text-right text-slate-600">
-                      {Number(
-                        row.lead_count
-                      )}
-                    </td>
-
-                    <td className="px-3 py-3 text-right font-semibold text-slate-700">
-                      {formatMoney(
-                        row.pipeline_value,
+                    const currency =
+                      normalizeCurrency(
                         row.currency
-                      )}
-                    </td>
+                      );
 
-                    <td className="px-3 py-3 text-right font-bold text-slate-800">
-                      {formatMoney(
-                        row.weighted_forecast,
-                        row.currency
-                      )}
-                    </td>
+                    const collected =
+                      netCollectedByStage(
+                        row.current_stage,
+                        currency
+                      );
 
-                    <td className="px-3 py-3 text-right font-semibold text-slate-700">
-                      {formatMoney(
-                        row.actual_revenue,
-                        row.currency
-                      )}
-                    </td>
+                    return (
+                      <tr
+                        key={
+                          `${currency}-${row.current_stage}`
+                        }
+                        className="border-b border-slate-50 last:border-0"
+                      >
+                        <td className="px-3 py-3 font-semibold capitalize text-slate-700">
+                          {pretty(
+                            row.current_stage
+                          )}
+                        </td>
 
-                  </tr>
+                        <td className="px-3 py-3 text-slate-500">
+                          {currency}
+                        </td>
 
-                ))}
+                        <td className="px-3 py-3 text-right text-slate-600">
+                          {Number(
+                            row.lead_count
+                          )}
+                        </td>
 
+                        <td className="px-3 py-3 text-right font-semibold text-slate-700">
+                          {formatMoney(
+                            row.pipeline_value,
+                            currency
+                          )}
+                        </td>
+
+                        <td className="px-3 py-3 text-right font-bold text-slate-800">
+                          {formatMoney(
+                            row.weighted_forecast,
+                            currency
+                          )}
+                        </td>
+
+                        <td className="px-3 py-3 text-right font-semibold text-slate-700">
+                          {formatMoney(
+                            collected,
+                            currency
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
+                )}
             </tbody>
-
           </table>
-
         </div>
-
       </section>
 
 
@@ -628,9 +1018,7 @@ const unvaluedLeads = forecasts.filter(
       =================================================== */}
 
       <section className="card-pad mt-4">
-
         <div>
-
           <div className="eyebrow">
             Forecast
           </div>
@@ -638,7 +1026,6 @@ const unvaluedLeads = forecasts.filter(
           <div className="section-title mt-1">
             Monthly revenue forecast
           </div>
-
         </div>
 
 
@@ -651,105 +1038,257 @@ const unvaluedLeads = forecasts.filter(
             xl:grid-cols-3
           "
         >
-
           {monthly
-  .filter(
-    (row) =>
-      toNumber(
-        row.pipeline_value
-      ) > 0 ||
-      toNumber(
-        row.weighted_forecast
-      ) > 0 ||
-      toNumber(
-        row.actual_revenue
-      ) > 0
-  )
-  .map((row) => (
+            .filter(
+              (row) => {
 
-            <div
-              key={`${row.currency}-${row.forecast_month}`}
-              className="
-                rounded-xl
-                border
-                border-slate-100
-                bg-slate-50
-                p-4
-              "
-            >
+                const currency =
+                  normalizeCurrency(
+                    row.currency
+                  );
 
-              <div className="flex items-start justify-between gap-4">
+                const collected =
+                  netCollectedByForecastMonth(
+                    row.forecast_month,
+                    currency
+                  );
 
-                <div>
+                return (
+                  toNumber(
+                    row.pipeline_value
+                  ) > 0 ||
+                  toNumber(
+                    row.weighted_forecast
+                  ) > 0 ||
+                  collected !== 0
+                );
+              }
+            )
+            .map(
+              (row) => {
 
-                  <div className="text-sm font-bold text-slate-800">
-                    {formatMonth(
-                      row.forecast_month
-                    )}
+                const currency =
+                  normalizeCurrency(
+                    row.currency
+                  );
+
+                const collected =
+                  netCollectedByForecastMonth(
+                    row.forecast_month,
+                    currency
+                  );
+
+                return (
+                  <div
+                    key={
+                      `${currency}-${row.forecast_month}`
+                    }
+                    className="
+                      rounded-xl
+                      border
+                      border-slate-100
+                      bg-slate-50
+                      p-4
+                    "
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-bold text-slate-800">
+                          {formatMonth(
+                            row.forecast_month
+                          )}
+                        </div>
+
+                        <div className="mt-1 text-xs text-slate-400">
+                          {Number(
+                            row.lead_count
+                          )}{' '}
+                          opportunities
+                        </div>
+                      </div>
+
+                      <span
+                        className="
+                          rounded-lg
+                          bg-white
+                          px-2
+                          py-1
+                          text-xs
+                          font-bold
+                          text-slate-500
+                        "
+                      >
+                        {currency}
+                      </span>
+                    </div>
+
+
+                    <div className="mt-4 space-y-2">
+                      <MiniValue
+                        label="Pipeline"
+                        value={
+                          formatMoney(
+                            row.pipeline_value,
+                            currency
+                          )
+                        }
+                      />
+
+                      <MiniValue
+                        label="Weighted"
+                        value={
+                          formatMoney(
+                            row.weighted_forecast,
+                            currency
+                          )
+                        }
+                      />
+
+                      <MiniValue
+                        label="Net collected"
+                        value={
+                          formatMoney(
+                            collected,
+                            currency
+                          )
+                        }
+                      />
+                    </div>
                   </div>
-
-                  <div className="mt-1 text-xs text-slate-400">
-                    {Number(
-                      row.lead_count
-                    )}
-                    {' '}
-                    opportunities
-                  </div>
-
-                </div>
+                );
+              }
+            )}
+        </div>
+      </section>
 
 
-                <span
-                  className="
-                    rounded-lg
-                    bg-white
-                    px-2
-                    py-1
-                    text-xs
-                    font-bold
-                    text-slate-500
-                  "
-                >
-                  {row.currency}
-                </span>
+      {/* ===================================================
+          ACTUAL CASH REVENUE BY PAYMENT MONTH
+      =================================================== */}
 
-              </div>
+      <section className="card-pad mt-4">
+        <div>
+          <div className="eyebrow">
+            Payments
+          </div>
 
+          <div className="section-title mt-1">
+            Actual cash revenue by month
+          </div>
 
-              <div className="mt-4 space-y-2">
-
-                <MiniValue
-                  label="Pipeline"
-                  value={formatMoney(
-                    row.pipeline_value,
-                    row.currency
-                  )}
-                />
-
-                <MiniValue
-                  label="Weighted"
-                  value={formatMoney(
-                    row.weighted_forecast,
-                    row.currency
-                  )}
-                />
-
-                <MiniValue
-                  label="Revenue"
-                  value={formatMoney(
-                    row.actual_revenue,
-                    row.currency
-                  )}
-                />
-
-              </div>
-
-            </div>
-
-          ))}
-
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            Revenue is recognized here from payment records using the payment date.
+            Refunds reduce net revenue.
+          </p>
         </div>
 
+
+        <div
+          className="
+            mt-5
+            grid
+            gap-3
+            md:grid-cols-2
+            xl:grid-cols-3
+          "
+        >
+          {cashMonths.length === 0 && (
+            <div className="text-sm text-slate-400">
+              No paid transactions have been recorded yet.
+            </div>
+          )}
+
+
+          {cashMonths.map(
+            (row) => {
+
+              const currency =
+                normalizeCurrency(
+                  row.currency
+                );
+
+              return (
+                <div
+                  key={
+                    `${currency}-${row.revenue_month}`
+                  }
+                  className="
+                    rounded-xl
+                    border
+                    border-slate-100
+                    bg-slate-50
+                    p-4
+                  "
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-bold text-slate-800">
+                        {formatMonth(
+                          row.revenue_month
+                        )}
+                      </div>
+
+                      <div className="mt-1 text-xs text-slate-400">
+                        {Number(
+                          row.successful_payments ??
+                          0
+                        )}{' '}
+                        successful payments
+                      </div>
+                    </div>
+
+                    <span
+                      className="
+                        rounded-lg
+                        bg-white
+                        px-2
+                        py-1
+                        text-xs
+                        font-bold
+                        text-slate-500
+                      "
+                    >
+                      {currency}
+                    </span>
+                  </div>
+
+
+                  <div className="mt-4 space-y-2">
+                    <MiniValue
+                      label="Gross received"
+                      value={
+                        formatMoney(
+                          row.gross_received,
+                          currency
+                        )
+                      }
+                    />
+
+                    <MiniValue
+                      label="Refunds"
+                      value={
+                        formatMoney(
+                          row.refunds,
+                          currency
+                        )
+                      }
+                    />
+
+                    <MiniValue
+                      label="Net revenue"
+                      value={
+                        formatMoney(
+                          row.actual_revenue,
+                          currency
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              );
+            }
+          )}
+        </div>
       </section>
 
 
@@ -765,69 +1304,109 @@ const unvaluedLeads = forecasts.filter(
           xl:grid-cols-2
         "
       >
-
         <BreakdownCard
           title="Revenue by source"
           eyebrow="Attribution"
-          icon={<TrendingUp size={16} />}
-          rows={sources.map(
-            (row) => ({
-              name: pretty(
-                row.source
-              ),
+          icon={
+            <TrendingUp
+              size={16}
+            />
+          }
+          rows={
+            sources.map(
+              (row) => {
 
-              currency:
-                row.currency,
+                const currency =
+                  normalizeCurrency(
+                    row.currency
+                  );
 
-              count:
-                Number(
-                  row.lead_count
-                ),
+                return {
+                  name:
+                    pretty(
+                      row.source
+                    ),
 
-              pipeline:
-                toNumber(
-                  row.pipeline_value
-                ),
+                  currency,
 
-              weighted:
-                toNumber(
-                  row.weighted_forecast
-                ),
-            })
-          )}
+                  count:
+                    Number(
+                      row.lead_count
+                    ),
+
+                  pipeline:
+                    toNumber(
+                      row.pipeline_value
+                    ),
+
+                  weighted:
+                    toNumber(
+                      row.weighted_forecast
+                    ),
+
+                  actual:
+                    netCollectedBySource(
+                      row.source ||
+                      'Unknown',
+                      currency
+                    ),
+                };
+              }
+            )
+          }
         />
 
 
         <BreakdownCard
           title="Revenue by location"
           eyebrow="Markets"
-          icon={<MapPin size={16} />}
-          rows={locations.map(
-            (row) => ({
-              name:
-                row.location,
+          icon={
+            <MapPin
+              size={16}
+            />
+          }
+          rows={
+            locations.map(
+              (row) => {
 
-              currency:
-                row.currency,
+                const currency =
+                  normalizeCurrency(
+                    row.currency
+                  );
 
-              count:
-                Number(
-                  row.lead_count
-                ),
+                return {
+                  name:
+                    row.location ||
+                    'Unknown',
 
-              pipeline:
-                toNumber(
-                  row.pipeline_value
-                ),
+                  currency,
 
-              weighted:
-                toNumber(
-                  row.weighted_forecast
-                ),
-            })
-          )}
+                  count:
+                    Number(
+                      row.lead_count
+                    ),
+
+                  pipeline:
+                    toNumber(
+                      row.pipeline_value
+                    ),
+
+                  weighted:
+                    toNumber(
+                      row.weighted_forecast
+                    ),
+
+                  actual:
+                    netCollectedByLocation(
+                      row.location ||
+                      'Unknown',
+                      currency
+                    ),
+                };
+              }
+            )
+          }
         />
-
       </div>
 
 
@@ -836,11 +1415,8 @@ const unvaluedLeads = forecasts.filter(
       =================================================== */}
 
       <section className="card-pad mt-4">
-
         <div className="flex items-center justify-between gap-4">
-
           <div>
-
             <div className="eyebrow">
               Opportunities
             </div>
@@ -848,26 +1424,19 @@ const unvaluedLeads = forecasts.filter(
             <div className="section-title mt-1">
               Highest-value open leads
             </div>
-
           </div>
-
 
           <Users
             size={20}
             className="text-slate-400"
           />
-
         </div>
 
 
         <div className="mt-5 overflow-x-auto">
-
           <table className="min-w-full text-left text-sm">
-
             <thead>
-
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-
                 <th className="px-3 py-3">
                   Lead
                 </th>
@@ -892,29 +1461,26 @@ const unvaluedLeads = forecasts.filter(
                   Weighted
                 </th>
 
-                <th className="px-3 py-3">
+                <th className="px-3 py-3 text-right">
+                  Paid
                 </th>
 
+                <th className="px-3 py-3">
+                </th>
               </tr>
-
             </thead>
 
 
             <tbody>
-
               {topOpportunities.length === 0 && (
-
                 <tr>
-
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-3 py-8 text-center text-sm text-slate-400"
                   >
                     No valued opportunities yet.
                   </td>
-
                 </tr>
-
               )}
 
 
@@ -922,12 +1488,12 @@ const unvaluedLeads = forecasts.filter(
                 (row) => (
 
                   <tr
-                    key={row.id}
+                    key={
+                      row.id
+                    }
                     className="border-b border-slate-50 last:border-0"
                   >
-
                     <td className="px-3 py-3">
-
                       <div className="font-semibold text-slate-800">
                         {row.lead_name ||
                           row.lead_code}
@@ -936,7 +1502,6 @@ const unvaluedLeads = forecasts.filter(
                       <div className="mt-0.5 text-xs text-slate-400">
                         {row.lead_code}
                       </div>
-
                     </td>
 
 
@@ -956,7 +1521,7 @@ const unvaluedLeads = forecasts.filter(
                     <td className="px-3 py-3 text-slate-600">
                       {pretty(
                         row.first_touch_source ||
-                          'Unknown'
+                        'Unknown'
                       )}
                     </td>
 
@@ -977,10 +1542,21 @@ const unvaluedLeads = forecasts.filter(
                     </td>
 
 
-                    <td className="px-3 py-3 text-right">
+                    <td className="px-3 py-3 text-right font-semibold text-slate-700">
+                      {formatMoney(
+                        netPaidForLead(
+                          row.id
+                        ),
+                        row.currency
+                      )}
+                    </td>
 
+
+                    <td className="px-3 py-3 text-right">
                       <Link
-                        href={`/leads/${row.id}`}
+                        href={
+                          `/leads/${row.id}`
+                        }
                         className="inline-flex items-center gap-1 text-xs font-bold text-brand"
                       >
                         View
@@ -989,20 +1565,13 @@ const unvaluedLeads = forecasts.filter(
                           size={13}
                         />
                       </Link>
-
                     </td>
-
                   </tr>
-
                 )
               )}
-
             </tbody>
-
           </table>
-
         </div>
-
       </section>
 
 
@@ -1011,9 +1580,7 @@ const unvaluedLeads = forecasts.filter(
       =================================================== */}
 
       <section className="card-pad mt-4">
-
         <div>
-
           <div className="eyebrow">
             Closing
           </div>
@@ -1021,18 +1588,14 @@ const unvaluedLeads = forecasts.filter(
           <div className="section-title mt-1">
             Expected to close this month
           </div>
-
         </div>
 
 
         <div className="mt-5 space-y-3">
-
           {closingThisMonth.length === 0 && (
-
             <div className="rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
               No open opportunities currently have an expected close date this month.
             </div>
-
           )}
 
 
@@ -1040,8 +1603,12 @@ const unvaluedLeads = forecasts.filter(
             (row) => (
 
               <Link
-                key={row.id}
-                href={`/leads/${row.id}`}
+                key={
+                  row.id
+                }
+                href={
+                  `/leads/${row.id}`
+                }
                 className="
                   flex
                   items-center
@@ -1056,9 +1623,7 @@ const unvaluedLeads = forecasts.filter(
                   hover:bg-slate-50
                 "
               >
-
                 <div>
-
                   <div className="font-semibold text-slate-800">
                     {row.lead_name ||
                       row.lead_code}
@@ -1068,20 +1633,22 @@ const unvaluedLeads = forecasts.filter(
                     {pretty(
                       row.current_stage
                     )}
+
                     {' · '}
+
                     {row.preferred_location ||
                       'Unknown location'}
+
                     {' · '}
+
                     {formatDate(
                       row.expected_close_date
                     )}
                   </div>
-
                 </div>
 
 
                 <div className="text-right">
-
                   <div className="font-bold text-slate-800">
                     {formatMoney(
                       row.weighted_value,
@@ -1092,18 +1659,12 @@ const unvaluedLeads = forecasts.filter(
                   <div className="mt-1 text-xs text-slate-400">
                     weighted
                   </div>
-
                 </div>
-
               </Link>
-
             )
           )}
-
         </div>
-
       </section>
-
     </>
   );
 }
@@ -1117,28 +1678,29 @@ function MetricCard({
   icon,
   label,
   value,
+  sub,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value: string;
+  sub?: string;
 }) {
-
   return (
     <div className="rounded-xl bg-slate-50 p-4">
-
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-
         {icon}
-
         {label}
-
       </div>
-
 
       <div className="mt-2 text-xl font-bold text-slate-800">
         {value}
       </div>
 
+      {sub && (
+        <div className="mt-1 text-[11px] text-slate-400">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -1151,10 +1713,8 @@ function MiniValue({
   label: string;
   value: string;
 }) {
-
   return (
     <div className="flex items-center justify-between gap-4">
-
       <span className="text-xs text-slate-400">
         {label}
       </span>
@@ -1162,7 +1722,6 @@ function MiniValue({
       <span className="text-sm font-bold text-slate-700">
         {value}
       </span>
-
     </div>
   );
 }
@@ -1176,7 +1735,7 @@ function BreakdownCard({
 }: {
   title: string;
   eyebrow: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 
   rows: Array<{
     name: string;
@@ -1184,25 +1743,32 @@ function BreakdownCard({
     count: number;
     pipeline: number;
     weighted: number;
+    actual: number;
   }>;
 }) {
-
-  const sorted = [...rows]
-    .sort(
-      (a, b) =>
-        b.weighted -
-        a.weighted
-    )
-    .slice(0, 10);
+  const sorted =
+    [...rows]
+      .filter(
+        (row) =>
+          row.pipeline !== 0 ||
+          row.weighted !== 0 ||
+          row.actual !== 0
+      )
+      .sort(
+        (a, b) =>
+          b.weighted -
+          a.weighted
+      )
+      .slice(
+        0,
+        10
+      );
 
 
   return (
     <section className="card-pad">
-
       <div className="flex items-center justify-between">
-
         <div>
-
           <div className="eyebrow">
             {eyebrow}
           </div>
@@ -1210,32 +1776,32 @@ function BreakdownCard({
           <div className="section-title mt-1">
             {title}
           </div>
-
         </div>
 
         <div className="text-slate-400">
           {icon}
         </div>
-
       </div>
 
 
       <div className="mt-5 space-y-3">
-
         {sorted.length === 0 && (
-
           <div className="text-sm text-slate-400">
             No forecast data yet.
           </div>
-
         )}
 
 
         {sorted.map(
-          (row, index) => (
+          (
+            row,
+            index
+          ) => (
 
             <div
-              key={`${row.name}-${row.currency}-${index}`}
+              key={
+                `${row.name}-${row.currency}-${index}`
+              }
               className="
                 rounded-xl
                 border
@@ -1243,28 +1809,21 @@ function BreakdownCard({
                 p-3
               "
             >
-
               <div className="flex items-start justify-between gap-4">
-
                 <div>
-
                   <div className="text-sm font-semibold text-slate-800">
                     {row.name}
                   </div>
 
                   <div className="mt-1 text-xs text-slate-400">
-                    {row.count}
-                    {' '}
+                    {row.count}{' '}
                     leads
                     {' · '}
                     {row.currency}
                   </div>
-
                 </div>
 
-
                 <div className="text-right">
-
                   <div className="text-sm font-bold text-slate-800">
                     {formatMoney(
                       row.weighted,
@@ -1275,34 +1834,35 @@ function BreakdownCard({
                   <div className="mt-1 text-[11px] text-slate-400">
                     weighted
                   </div>
-
                 </div>
-
               </div>
 
 
-              <div className="mt-3 flex items-center justify-between text-xs">
+              <div className="mt-3 space-y-1.5">
+                <MiniValue
+                  label="Pipeline"
+                  value={
+                    formatMoney(
+                      row.pipeline,
+                      row.currency
+                    )
+                  }
+                />
 
-                <span className="text-slate-400">
-                  Pipeline
-                </span>
-
-                <span className="font-semibold text-slate-600">
-                  {formatMoney(
-                    row.pipeline,
-                    row.currency
-                  )}
-                </span>
-
+                <MiniValue
+                  label="Net collected"
+                  value={
+                    formatMoney(
+                      row.actual,
+                      row.currency
+                    )
+                  }
+                />
               </div>
-
             </div>
-
           )
         )}
-
       </div>
-
     </section>
   );
 }
@@ -1312,6 +1872,19 @@ function BreakdownCard({
    HELPERS
 ========================================================= */
 
+function normalizeCurrency(
+  value:
+    | string
+    | null
+    | undefined
+) {
+  return String(
+    value ||
+    ''
+  ).toUpperCase();
+}
+
+
 function toNumber(
   value:
     | number
@@ -1319,11 +1892,15 @@ function toNumber(
     | null
     | undefined
 ) {
-
   const number =
-    Number(value ?? 0);
+    Number(
+      value ??
+      0
+    );
 
-  return Number.isFinite(number)
+  return Number.isFinite(
+    number
+  )
     ? number
     : 0;
 }
@@ -1337,11 +1914,15 @@ function sum(
     undefined
   >
 ) {
-
   return values.reduce<number>(
-    (total, value) =>
+    (
+      total,
+      value
+    ) =>
       total +
-      toNumber(value),
+      toNumber(
+        value
+      ),
     0
   );
 }
@@ -1359,34 +1940,39 @@ function formatMoney(
     | null
     | undefined
 ) {
-
   const amount =
-    toNumber(value);
+    toNumber(
+      value
+    );
 
   const code =
-    String(
-      currency ||
-      'INR'
-    ).toUpperCase();
+    normalizeCurrency(
+      currency
+    ) ||
+    'INR';
 
 
   try {
-
     return new Intl.NumberFormat(
       code === 'INR'
         ? 'en-IN'
         : 'en-US',
       {
-        style: 'currency',
-        currency: code,
-        maximumFractionDigits: 0,
+        style:
+          'currency',
+
+        currency:
+          code,
+
+        maximumFractionDigits:
+          0,
       }
-    ).format(amount);
+    ).format(
+      amount
+    );
 
   } catch {
-
     return `${code} ${amount.toLocaleString()}`;
-
   }
 }
 
@@ -1397,17 +1983,22 @@ function pretty(
     | null
     | undefined
 ) {
-
   if (!value) {
     return '—';
   }
 
-
-  return String(value)
-    .replaceAll('_', ' ')
+  return String(
+    value
+  )
+    .replaceAll(
+      '_',
+      ' '
+    )
     .replace(
       /\b\w/g,
-      (letter) =>
+      (
+        letter
+      ) =>
         letter.toUpperCase()
     );
 }
@@ -1419,17 +2010,14 @@ function formatMonth(
     | null
     | undefined
 ) {
-
   if (!value) {
     return 'Unknown month';
   }
-
 
   const date =
     new Date(
       `${value.slice(0, 10)}T00:00:00Z`
     );
-
 
   if (
     Number.isNaN(
@@ -1439,15 +2027,21 @@ function formatMonth(
     return value;
   }
 
-
   return new Intl.DateTimeFormat(
     'en',
     {
-      month: 'long',
-      year: 'numeric',
-      timeZone: 'UTC',
+      month:
+        'long',
+
+      year:
+        'numeric',
+
+      timeZone:
+        'UTC',
     }
-  ).format(date);
+  ).format(
+    date
+  );
 }
 
 
@@ -1457,17 +2051,14 @@ function formatDate(
     | null
     | undefined
 ) {
-
   if (!value) {
     return 'No date';
   }
-
 
   const date =
     new Date(
       `${value.slice(0, 10)}T00:00:00Z`
     );
-
 
   if (
     Number.isNaN(
@@ -1477,14 +2068,22 @@ function formatDate(
     return value;
   }
 
-
   return new Intl.DateTimeFormat(
     'en',
     {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'UTC',
+      day:
+        'numeric',
+
+      month:
+        'short',
+
+      year:
+        'numeric',
+
+      timeZone:
+        'UTC',
     }
-  ).format(date);
+  ).format(
+    date
+  );
 }
