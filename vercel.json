@@ -8,6 +8,10 @@
     {
       "path": "/api/analytics/gsc/sync",
       "schedule": "15 5 * * *"
+    },
+    {
+      "path": "/api/analytics/google-ads/sync",
+      "schedule": "45 5 * * *"
     }
   ]
 }

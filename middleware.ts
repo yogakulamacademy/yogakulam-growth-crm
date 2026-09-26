@@ -1,24 +1,9 @@
-import {
-  createServerClient,
-} from '@supabase/ssr';
-
-import {
-  NextResponse,
-  type NextRequest,
-} from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
 
 
 // These routes must be reachable without a Supabase user session.
-//
-// Security for public ingestion/sync endpoints is enforced inside
-// each route:
-//
-// - tracking/collect: allowed Origin + payload validation
-// - tracking/identify: allowed Origin + TRACKING_INGEST_SECRET
-// - leads/capture: WEBSITE_LEAD_CAPTURE_SECRET
-// - analytics/ga4/sync: GA4_SYNC_SECRET or CRON_SECRET
-// - analytics/gsc/sync: GSC_SYNC_SECRET or CRON_SECRET
-
+// Each public integration endpoint protects itself at route level.
 const PUBLIC_EXACT_PATHS =
   new Set([
     '/login',
@@ -26,6 +11,7 @@ const PUBLIC_EXACT_PATHS =
     '/api/leads/capture',
     '/api/analytics/ga4/sync',
     '/api/analytics/gsc/sync',
+    '/api/analytics/google-ads/sync',
   ]);
 
 
@@ -40,7 +26,6 @@ function isPublicPath(
     return true;
   }
 
-
   if (
     pathname.startsWith(
       '/api/tracking/'
@@ -48,7 +33,6 @@ function isPublicPath(
   ) {
     return true;
   }
-
 
   return false;
 }
@@ -67,14 +51,13 @@ export async function middleware(
 
 
   /*
-   * Public browser/server integration routes bypass CRM user auth.
-   * Their route-level security remains responsible for authorization.
+   * Public browser/server integration routes must bypass
+   * CRM user authentication. Their own route-level controls
+   * remain responsible for authorization.
    */
   if (
     isPublicPath(
-      request
-        .nextUrl
-        .pathname
+      request.nextUrl.pathname
     )
   ) {
     return NextResponse.next();
@@ -84,7 +67,6 @@ export async function middleware(
   const url =
     process.env
       .NEXT_PUBLIC_SUPABASE_URL;
-
 
   const key =
     process.env
@@ -122,40 +104,40 @@ export async function middleware(
           setAll(
             cookiesToSet
           ) {
-            cookiesToSet.forEach(
-              ({
-                name,
-                value,
-              }) =>
-                request
-                  .cookies
-                  .set(
-                    name,
-                    value
-                  )
-            );
-
+            cookiesToSet
+              .forEach(
+                ({
+                  name,
+                  value,
+                }) =>
+                  request
+                    .cookies
+                    .set(
+                      name,
+                      value
+                    )
+              );
 
             response =
               NextResponse.next({
                 request,
               });
 
-
-            cookiesToSet.forEach(
-              ({
-                name,
-                value,
-                options,
-              }) =>
-                response
-                  .cookies
-                  .set(
-                    name,
-                    value,
-                    options
-                  )
-            );
+            cookiesToSet
+              .forEach(
+                ({
+                  name,
+                  value,
+                  options,
+                }) =>
+                  response
+                    .cookies
+                    .set(
+                      name,
+                      value,
+                      options
+                    )
+              );
           },
         },
       }
@@ -182,24 +164,18 @@ export async function middleware(
     !isAuthenticated
   ) {
     const redirectUrl =
-      request
-        .nextUrl
+      request.nextUrl
         .clone();
-
 
     redirectUrl.pathname =
       '/login';
-
 
     redirectUrl
       .searchParams
       .set(
         'next',
-        request
-          .nextUrl
-          .pathname
+        request.nextUrl.pathname
       );
-
 
     return NextResponse.redirect(
       redirectUrl
@@ -208,24 +184,18 @@ export async function middleware(
 
 
   if (
-    request
-      .nextUrl
-      .pathname ===
+    request.nextUrl.pathname ===
     '/login'
   ) {
     const redirectUrl =
-      request
-        .nextUrl
+      request.nextUrl
         .clone();
-
 
     redirectUrl.pathname =
       '/dashboard';
 
-
     redirectUrl.search =
       '';
-
 
     return NextResponse.redirect(
       redirectUrl
