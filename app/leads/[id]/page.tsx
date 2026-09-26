@@ -6,7 +6,6 @@ import {
   CircleDollarSign,
   Clock3,
   ExternalLink,
-  FileText,
   Globe2,
   Mail,
   MapPin,
@@ -15,15 +14,20 @@ import {
   MousePointerClick,
   Pencil,
   Phone,
-  Route,
+  Send,
   UserRound,
 } from 'lucide-react';
 
 import {
   createFollowUpAction,
   logLeadInteractionAction,
+  recordPaymentAction,
   updateLeadStageAction,
 } from '@/app/actions/crm';
+
+import {
+  PaymentCard,
+} from '@/components/payment-card';
 
 import {
   ChannelBadge,
@@ -34,11 +38,11 @@ import {
 
 import {
   getLead,
+  getLeadPayments,
   isMockMode,
 } from '@/lib/data';
 
 import {
-  formatCurrency,
   formatDateTime,
 } from '@/lib/format';
 
@@ -46,11 +50,6 @@ import type {
   Channel,
   LeadStage,
 } from '@/types/crm';
-
-
-/* =========================================================
-   TIMELINE COLORS
-========================================================= */
 
 const kindDot: Record<string, string> = {
   marketing: 'bg-violet-500',
@@ -61,12 +60,10 @@ const kindDot: Record<string, string> = {
   system: 'bg-slate-400',
 };
 
-
-/* =========================================================
-   FUNNEL STAGES
-========================================================= */
-
-const stages: Array<[LeadStage, string]> = [
+const stages: Array<[
+  LeadStage,
+  string,
+]> = [
   ['new', 'New'],
   ['contacted', 'Contacted'],
   ['engaged', 'Engaged'],
@@ -81,12 +78,10 @@ const stages: Array<[LeadStage, string]> = [
   ['duplicate', 'Duplicate'],
 ];
 
-
-/* =========================================================
-   CHANNELS
-========================================================= */
-
-const channels: Array<[Channel, string]> = [
+const channels: Array<[
+  Channel,
+  string,
+]> = [
   ['instagram', 'Instagram'],
   ['whatsapp', 'WhatsApp'],
   ['website', 'Website'],
@@ -95,11 +90,6 @@ const channels: Array<[Channel, string]> = [
   ['meta_lead_form', 'Meta Lead Form'],
   ['other', 'Other'],
 ];
-
-
-/* =========================================================
-   PAGE
-========================================================= */
 
 export default async function LeadDetailPage({
   params,
@@ -111,231 +101,140 @@ export default async function LeadDetailPage({
     error?: string;
   }>;
 }) {
+  const [
+    { id },
+    query,
+  ] = await Promise.all([
+    params,
+    searchParams,
+  ]);
 
-  const [{ id }, query] =
-    await Promise.all([
-      params,
-      searchParams,
-    ]);
-
-
-  const lead = await getLead(id);
+  const [
+    lead,
+    payments,
+  ] = await Promise.all([
+    getLead(id),
+    getLeadPayments(id),
+  ]);
 
   if (!lead) {
     notFound();
   }
 
-
   const stageAction =
-    updateLeadStageAction.bind(null, id);
+    updateLeadStageAction.bind(
+      null,
+      id
+    );
 
   const followUpAction =
-    createFollowUpAction.bind(null, id);
+    createFollowUpAction.bind(
+      null,
+      id
+    );
 
   const interactionAction =
-    logLeadInteractionAction.bind(null, id);
+    logLeadInteractionAction.bind(
+      null,
+      id
+    );
 
-  const mock = isMockMode();
+  const paymentAction =
+    recordPaymentAction.bind(
+      null,
+      id
+    );
 
-
-  /* =======================================================
-     ENRICHED LEAD FIELDS
-
-     These fields now exist in Supabase.
-     We cast temporarily so this page can use them even
-     before the main Lead Type is updated.
-  ======================================================= */
-
-  const enriched = lead as typeof lead & {
-
-    preferredLocation?: string | null;
-
-    potentialValue?: number | null;
-    potentialCurrency?: string | null;
-
-    geoCountry?: string | null;
-    geoRegion?: string | null;
-    geoCity?: string | null;
-    geoTimezone?: string | null;
-
-    leadOrigin?: string | null;
-    landingPage?: string | null;
-
-    firstTouchSource?: string | null;
-    firstTouchMedium?: string | null;
-    firstTouchCampaign?: string | null;
-
-    lastTouchSource?: string | null;
-    lastTouchMedium?: string | null;
-    lastTouchCampaign?: string | null;
-  };
-
-
-  /* =======================================================
-     DISPLAY VALUES
-  ======================================================= */
+  const mock =
+    isMockMode();
 
   const visitorLocation = [
-    enriched.geoCity,
-    enriched.geoRegion,
-    enriched.geoCountry,
+    lead.geoCity,
+    lead.geoRegion,
+    lead.geoCountry,
   ]
     .filter(Boolean)
-    .join(', ') || '—';
-
-
-  const preferredLocation =
-    enriched.preferredLocation ||
-    lead.location ||
+    .join(', ') ||
     '—';
 
-
-  const potentialValue =
-    enriched.potentialValue ??
-    lead.value ??
-    null;
-
-
-  const potentialCurrency =
-    enriched.potentialCurrency ||
-    lead.currency ||
-    'INR';
-
-
-  const leadOrigin =
-    enriched.leadOrigin ||
-    lead.leadCreationChannel ||
-    'Website';
-
-
-  const firstTouchLabel =
-    formatSourceMedium(
-      enriched.firstTouchSource ||
-        lead.firstTouchSource,
-
-      enriched.firstTouchMedium ||
-        lead.firstTouchMedium
+  const normalizedPoints =
+    lead.touchpoints.map(
+      (point) => ({
+        point,
+        haystack: [
+          point.label,
+          point.source,
+          point.medium,
+          point.detail,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase(),
+      })
     );
-
-
-  const firstTouchCampaign =
-    enriched.firstTouchCampaign ||
-    lead.firstTouchCampaign ||
-    undefined;
-
-
-  const lastTouchLabel =
-    formatSourceMedium(
-      enriched.lastTouchSource,
-      enriched.lastTouchMedium
-    );
-
-
-  /* =======================================================
-     WEBSITE ENGAGEMENT
-  ======================================================= */
 
   const pageViews =
-    lead.touchpoints.filter(
-      (point) => {
-        const text =
-          normalizePoint(point);
-
-        return (
-          text.includes('page view') ||
-          text.includes('page_view')
-        );
-      }
+    normalizedPoints.filter(
+      ({ haystack }) =>
+        haystack.includes('page view') ||
+        haystack.includes('page_view') ||
+        haystack.includes('pageview')
     ).length;
-
-
-  const formStarts =
-    lead.touchpoints.filter(
-      (point) => {
-        const text =
-          normalizePoint(point);
-
-        return (
-          text.includes('form start') ||
-          text.includes('form_start')
-        );
-      }
-    ).length;
-
-
-  const formSubmissions =
-    lead.touchpoints.filter(
-      (point) => {
-        const text =
-          normalizePoint(point);
-
-        return (
-          text.includes('form submit') ||
-          text.includes('lead form submit') ||
-          text.includes('lead_form_submit')
-        );
-      }
-    ).length;
-
-
-  const whatsappPoints =
-    lead.touchpoints.filter(
-      (point) =>
-        normalizePoint(point)
-          .includes('whatsapp')
-    );
-
 
   const whatsappClicks =
-    whatsappPoints.length;
+    normalizedPoints.filter(
+      ({ haystack }) =>
+        haystack.includes('whatsapp') &&
+        (
+          haystack.includes('click') ||
+          haystack.includes('cta')
+        )
+    ).length;
 
+  const formStarts =
+    normalizedPoints.filter(
+      ({ haystack }) =>
+        haystack.includes('form start') ||
+        haystack.includes('form_start')
+    ).length;
+
+  const submissions =
+    normalizedPoints.filter(
+      ({ haystack }) =>
+        haystack.includes('form submit') ||
+        haystack.includes('form_submit') ||
+        haystack.includes('lead form submit') ||
+        haystack.includes('lead_form_submit')
+    ).length;
+
+  const whatsappPoints =
+    normalizedPoints.filter(
+      ({ haystack }) =>
+        haystack.includes('whatsapp')
+    );
 
   const latestWhatsapp =
-  whatsappPoints.length > 0
-    ? whatsappPoints[
-        whatsappPoints.length - 1
-      ]
-    : null;
-
-
-  /* =======================================================
-     PAGE RENDER
-  ======================================================= */
+    whatsappPoints.length > 0
+      ? whatsappPoints[
+          whatsappPoints.length - 1
+        ].point
+      : null;
 
   return (
     <>
-
-      {/* BACK */}
-
       <Link
         href="/leads"
-        className="
-          mb-4
-          inline-flex
-          items-center
-          gap-2
-          text-sm
-          font-semibold
-          text-slate-500
-          hover:text-brand
-        "
+        className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-brand"
       >
         <ArrowLeft size={15} />
         Back to leads
       </Link>
 
-
-      {/* HEADER */}
-
       <PageHeader
-
         title={lead.name}
-
         description={`${lead.leadCode} · ${lead.country} · ${lead.course}`}
-
         actions={
           <>
-
             <Link
               href={`/leads/${id}/edit`}
               className="btn-secondary"
@@ -344,7 +243,6 @@ export default async function LeadDetailPage({
               Edit lead
             </Link>
 
-
             <Link
               href={`/conversations?lead=${id}`}
               className="btn-primary"
@@ -352,144 +250,49 @@ export default async function LeadDetailPage({
               <MessageCircle size={16} />
               Open conversation
             </Link>
-
           </>
         }
-
       />
 
-
-      {/* ERROR */}
-
       {query.error && (
-
-        <div
-          className="
-            mb-4
-            rounded-xl
-            border
-            border-red-100
-            bg-red-50
-            px-4
-            py-3
-            text-sm
-            font-medium
-            text-red-700
-          "
-        >
+        <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           {query.error}
         </div>
-
       )}
-
-
-      {/* NOTICE */}
 
       {query.notice && (
-
         <div
-          className={`
-            mb-4
-            rounded-xl
-            border
-            px-4
-            py-3
-            text-sm
-            font-medium
-
-            ${
-              query.notice.startsWith('mock-')
-                ? `
-                  border-orange-100
-                  bg-orange-50
-                  text-orange-700
-                `
-                : `
-                  border-emerald-100
-                  bg-emerald-50
-                  text-emerald-700
-                `
-            }
-          `}
+          className={`mb-4 rounded-xl border px-4 py-3 text-sm font-medium ${
+            query.notice.startsWith('mock-')
+              ? 'border-orange-100 bg-orange-50 text-orange-700'
+              : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+          }`}
         >
-
-          {noticeText(query.notice)}
-
+          {noticeText(
+            query.notice
+          )}
         </div>
-
       )}
 
-
-      {/* STATUS BADGES */}
-
-      <div
-        className="
-          mb-4
-          flex
-          flex-wrap
-          gap-2
-        "
-      >
-
-        <StageBadge
-          stage={lead.stage}
-        />
-
-        <IntentLabel
-          intent={lead.intent}
-        />
-
-        <ChannelBadge
-          channel={
-            lead.currentContactChannel
-          }
-        />
+      <div className="mb-4 flex flex-wrap gap-2">
+        <StageBadge stage={lead.stage} />
+        <IntentLabel intent={lead.intent} />
+        <ChannelBadge channel={lead.currentContactChannel} />
 
         {mock && (
-
-          <span
-            className="
-              inline-flex
-              rounded-lg
-              bg-orange-50
-              px-2
-              py-1
-              text-[11px]
-              font-semibold
-              text-orange-700
-            "
-          >
+          <span className="inline-flex rounded-lg bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700">
             Mock mode
           </span>
-
         )}
-
       </div>
 
-
-      {/* ===================================================
-          MAIN GRID
-      =================================================== */}
-
-      <div
-        className="
-          grid
-          gap-4
-          xl:grid-cols-[1fr_360px]
-        "
-      >
-
-
-        {/* =================================================
-            LEFT SIDE
-        ================================================= */}
+      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
 
         <div className="space-y-4">
 
-
-          {/* ===============================================
+          {/* =================================================
               LEAD INTELLIGENCE
-          =============================================== */}
+          ================================================= */}
 
           <div className="card-pad">
 
@@ -501,34 +304,16 @@ export default async function LeadDetailPage({
               Overview
             </div>
 
-
-            {/* PRIMARY INTELLIGENCE */}
-
-            <div
-              className="
-                mt-5
-                grid
-                gap-4
-                sm:grid-cols-2
-                lg:grid-cols-4
-              "
-            >
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
               <Info
-                icon={
-                  <MapPin size={16} />
-                }
+                icon={<MapPin size={16} />}
                 label="Preferred location"
-                value={preferredLocation}
+                value={lead.location}
               />
 
-
               <Info
-                icon={
-                  <CalendarClock
-                    size={16}
-                  />
-                }
+                icon={<CalendarClock size={16} />}
                 label="Preferred month"
                 value={
                   lead.preferredMonth ??
@@ -536,13 +321,8 @@ export default async function LeadDetailPage({
                 }
               />
 
-
               <Info
-                icon={
-                  <UserRound
-                    size={16}
-                  />
-                }
+                icon={<UserRound size={16} />}
                 label="Mode"
                 value={
                   lead.preferredMode ??
@@ -550,76 +330,61 @@ export default async function LeadDetailPage({
                 }
               />
 
-
               <Info
-                icon={
-                  <CircleDollarSign
-                    size={16}
-                  />
-                }
+                icon={<CircleDollarSign size={16} />}
                 label="Potential value"
                 value={
-                  potentialValue !== null
-                    ? formatCurrency(
-                        potentialValue,
-                        potentialCurrency
+                  lead.potentialValue != null &&
+                  lead.potentialCurrency
+                    ? formatMoney(
+                        lead.potentialValue,
+                        lead.potentialCurrency
                       )
-                    : '—'
+                    : lead.value != null &&
+                      lead.currency
+                      ? formatMoney(
+                          lead.value,
+                          lead.currency
+                        )
+                      : '—'
                 }
               />
 
             </div>
 
 
-            {/* VISITOR / ATTRIBUTION INTELLIGENCE */}
-
-            <div
-              className="
-                mt-4
-                grid
-                gap-4
-                sm:grid-cols-2
-                lg:grid-cols-4
-              "
-            >
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
               <Info
-                icon={
-                  <Globe2 size={16} />
-                }
+                icon={<Globe2 size={16} />}
                 label="Visitor location"
                 value={visitorLocation}
               />
 
-
               <Info
-                icon={
-                  <Route size={16} />
-                }
-                label="Lead origin"
-                value={leadOrigin}
-              />
-
-
-              <Info
-                icon={
-                  <FileText size={16} />
-                }
-                label="Landing page"
+                icon={<Clock3 size={16} />}
+                label="Visitor timezone"
                 value={
-                  enriched.landingPage ||
+                  lead.geoTimezone ??
                   '—'
                 }
               />
 
+              <Info
+                icon={<Send size={16} />}
+                label="Lead origin"
+                value={
+                  prettyOptional(
+                    lead.leadOrigin
+                  )
+                }
+              />
 
               <Info
-                icon={
-                  <Clock3 size={16} />
-                }
-                label="Visitor timezone"
+                icon={<ExternalLink size={16} />}
+                label="Landing page"
                 value={
-                  enriched.geoTimezone ||
+                  lead.landingPage ??
                   '—'
                 }
               />
@@ -627,73 +392,26 @@ export default async function LeadDetailPage({
             </div>
 
 
-            {/* SUMMARY + NOTES */}
-
-            <div
-              className="
-                mt-5
-                grid
-                gap-4
-                border-t
-                border-slate-100
-                pt-5
-                md:grid-cols-2
-              "
-            >
+            <div className="mt-5 grid gap-4 border-t border-slate-100 pt-5 md:grid-cols-2">
 
               <div>
-
-                <div
-                  className="
-                    text-xs
-                    font-bold
-                    uppercase
-                    tracking-[.12em]
-                    text-slate-400
-                  "
-                >
+                <div className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">
                   AI/CRM summary
                 </div>
 
-                <p
-                  className="
-                    mt-2
-                    text-sm
-                    leading-6
-                    text-slate-600
-                  "
-                >
+                <p className="mt-2 text-sm leading-6 text-slate-600">
                   {lead.summary}
                 </p>
-
               </div>
 
-
               <div>
-
-                <div
-                  className="
-                    text-xs
-                    font-bold
-                    uppercase
-                    tracking-[.12em]
-                    text-slate-400
-                  "
-                >
+                <div className="text-xs font-bold uppercase tracking-[.12em] text-slate-400">
                   Internal notes
                 </div>
 
-                <p
-                  className="
-                    mt-2
-                    text-sm
-                    leading-6
-                    text-slate-600
-                  "
-                >
+                <p className="mt-2 text-sm leading-6 text-slate-600">
                   {lead.notes}
                 </p>
-
               </div>
 
             </div>
@@ -701,22 +419,98 @@ export default async function LeadDetailPage({
           </div>
 
 
-          {/* ===============================================
-              TIMELINE
-          =============================================== */}
+          {/* =================================================
+              PAYMENT MODULE
+          ================================================= */}
+
+          <PaymentCard
+            potentialValue={
+              lead.potentialValue ??
+              lead.value
+            }
+            potentialCurrency={
+              lead.potentialCurrency ??
+              lead.currency
+            }
+            payments={payments}
+            action={paymentAction}
+          />
+
+
+          {/* =================================================
+              ENGAGEMENT
+          ================================================= */}
 
           <div className="card-pad">
 
-            <div
-              className="
-                flex
-                items-center
-                justify-between
-              "
-            >
-
+            <div className="flex items-center justify-between gap-3">
               <div>
+                <div className="eyebrow">
+                  Website engagement
+                </div>
 
+                <div className="section-title mt-1">
+                  Lead activity
+                </div>
+              </div>
+
+              <MousePointerClick
+                size={20}
+                className="text-slate-400"
+              />
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Metric
+                label="Page views"
+                value={pageViews}
+              />
+
+              <Metric
+                label="WhatsApp clicks"
+                value={whatsappClicks}
+              />
+
+              <Metric
+                label="Form starts"
+                value={formStarts}
+              />
+
+              <Metric
+                label="Submissions"
+                value={submissions}
+              />
+            </div>
+
+            <div className="mt-4 rounded-xl bg-slate-50 p-4">
+              <div className="text-xs font-semibold text-slate-400">
+                Latest WhatsApp interaction
+              </div>
+
+              <div className="mt-2 text-sm font-semibold text-slate-700">
+                {latestWhatsapp
+                  ? `${latestWhatsapp.label} · ${formatDateTime(latestWhatsapp.timestamp)}`
+                  : 'No WhatsApp interaction tracked yet.'}
+              </div>
+
+              {latestWhatsapp?.detail && (
+                <div className="mt-1 text-xs leading-5 text-slate-500">
+                  {latestWhatsapp.detail}
+                </div>
+              )}
+            </div>
+
+          </div>
+
+
+          {/* =================================================
+              TIMELINE
+          ================================================= */}
+
+          <div className="card-pad">
+
+            <div className="flex items-center justify-between">
+              <div>
                 <div className="eyebrow">
                   Journey
                 </div>
@@ -724,176 +518,76 @@ export default async function LeadDetailPage({
                 <div className="section-title mt-1">
                   Lead timeline
                 </div>
-
               </div>
 
-
-              <span
-                className="
-                  text-xs
-                  text-slate-400
-                "
-              >
-                {lead.touchpoints.length}
-                {' '}
+              <span className="text-xs text-slate-400">
+                {lead.touchpoints.length}{' '}
                 events
               </span>
-
             </div>
 
 
-            <div
-              className="
-                mt-6
-                space-y-0
-              "
-            >
+            <div className="mt-6 space-y-0">
 
               {lead.touchpoints.length === 0 && (
-
-                <div
-                  className="
-                    text-sm
-                    text-slate-400
-                  "
-                >
+                <div className="text-sm text-slate-400">
                   No timeline events yet.
                 </div>
-
               )}
 
 
               {lead.touchpoints.map(
-                (point, idx) => (
-
+                (
+                  point,
+                  idx
+                ) => (
                   <div
                     key={point.id}
-                    className="
-                      relative
-                      flex
-                      gap-4
-                      pb-6
-                      last:pb-0
-                    "
+                    className="relative flex gap-4 pb-6 last:pb-0"
                   >
 
                     {idx !==
-                      lead.touchpoints.length -
-                        1 && (
-
-                      <div
-                        className="
-                          absolute
-                          left-[7px]
-                          top-4
-                          h-[calc(100%-4px)]
-                          w-px
-                          bg-slate-200
-                        "
-                      />
-
-                    )}
-
+                      lead.touchpoints.length - 1 && (
+                        <div className="absolute left-[7px] top-4 h-[calc(100%-4px)] w-px bg-slate-200" />
+                      )}
 
                     <div
-                      className={`
-                        relative
-                        mt-1
-                        h-4
-                        w-4
-                        shrink-0
-                        rounded-full
-                        border-4
-                        border-white
-                        shadow
-
-                        ${
-                          kindDot[
-                            point.kind
-                          ] ||
-                          'bg-slate-400'
-                        }
-                      `}
+                      className={`relative mt-1 h-4 w-4 shrink-0 rounded-full border-4 border-white shadow ${
+                        kindDot[point.kind] ??
+                        'bg-slate-400'
+                      }`}
                     />
 
+                    <div className="min-w-0 flex-1">
 
-                    <div
-                      className="
-                        min-w-0
-                        flex-1
-                      "
-                    >
-
-                      <div
-                        className="
-                          flex
-                          flex-col
-                          gap-1
-                          sm:flex-row
-                          sm:items-center
-                          sm:justify-between
-                        "
-                      >
-
-                        <div
-                          className="
-                            text-sm
-                            font-semibold
-                            capitalize
-                            text-slate-800
-                          "
-                        >
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-sm font-semibold capitalize text-slate-800">
                           {point.label}
                         </div>
 
-
-                        <div
-                          className="
-                            text-xs
-                            text-slate-400
-                          "
-                        >
+                        <div className="text-xs text-slate-400">
                           {formatDateTime(
                             point.timestamp
                           )}
                         </div>
-
                       </div>
 
-
-                      <div
-                        className="
-                          mt-1
-                          text-xs
-                          text-slate-500
-                        "
-                      >
+                      <div className="mt-1 text-xs text-slate-500">
                         {point.source}
-
                         {point.medium
                           ? ` · ${point.medium}`
                           : ''}
                       </div>
 
-
                       {point.detail && (
-
-                        <div
-                          className="
-                            mt-1.5
-                            text-sm
-                            text-slate-600
-                          "
-                        >
+                        <div className="mt-1.5 text-sm text-slate-600">
                           {point.detail}
                         </div>
-
                       )}
 
                     </div>
 
                   </div>
-
                 )
               )}
 
@@ -902,23 +596,14 @@ export default async function LeadDetailPage({
           </div>
 
 
-          {/* ===============================================
+          {/* =================================================
               RECENT INTERACTIONS
-          =============================================== */}
+          ================================================= */}
 
           <div className="card-pad">
 
-            <div
-              className="
-                flex
-                items-center
-                justify-between
-                gap-3
-              "
-            >
-
+            <div className="flex items-center justify-between gap-3">
               <div>
-
                 <div className="eyebrow">
                   Conversation
                 </div>
@@ -926,131 +611,65 @@ export default async function LeadDetailPage({
                 <div className="section-title mt-1">
                   Recent interactions
                 </div>
-
               </div>
-
 
               <Link
                 href={`/conversations?lead=${id}`}
-                className="
-                  text-xs
-                  font-semibold
-                  text-brand
-                "
+                className="text-xs font-semibold text-brand"
               >
                 Open inbox →
               </Link>
-
             </div>
 
 
-            <div
-              className="
-                mt-5
-                space-y-3
-              "
-            >
+            <div className="mt-5 space-y-3">
 
               {lead.lastMessages.length === 0 && (
-
-                <div
-                  className="
-                    text-sm
-                    text-slate-400
-                  "
-                >
-                  No interactions stored yet.
-                  Use “Log interaction” to
-                  test the workflow.
+                <div className="text-sm text-slate-400">
+                  No interactions stored yet. Use “Log interaction” to test the workflow.
                 </div>
-
               )}
 
 
               {lead.lastMessages.map(
                 (msg) => (
-
                   <div
                     key={msg.id}
-                    className={`
-                      flex
-
-                      ${
-                        msg.direction ===
-                        'outbound'
-                          ? 'justify-end'
-                          : 'justify-start'
-                      }
-                    `}
+                    className={`flex ${
+                      msg.direction === 'outbound'
+                        ? 'justify-end'
+                        : 'justify-start'
+                    }`}
                   >
 
                     <div
-                      className={`
-                        max-w-[82%]
-                        rounded-2xl
-                        px-4
-                        py-3
-
-                        ${
-                          msg.direction ===
-                          'outbound'
-                            ? `
-                              bg-brand
-                              text-white
-                            `
-                            : `
-                              border
-                              border-slate-200
-                              bg-slate-50
-                              text-slate-700
-                            `
-                        }
-                      `}
+                      className={`max-w-[82%] rounded-2xl px-4 py-3 ${
+                        msg.direction === 'outbound'
+                          ? 'bg-brand text-white'
+                          : 'border border-slate-200 bg-slate-50 text-slate-700'
+                      }`}
                     >
 
                       <div
-                        className={`
-                          mb-1
-                          text-[11px]
-                          font-semibold
-
-                          ${
-                            msg.direction ===
-                            'outbound'
-                              ? 'text-white/65'
-                              : 'text-slate-400'
-                          }
-                        `}
+                        className={`mb-1 text-[11px] font-semibold ${
+                          msg.direction === 'outbound'
+                            ? 'text-white/65'
+                            : 'text-slate-400'
+                        }`}
                       >
-                        {msg.sender}
-                        {' · '}
-                        {msg.channel}
+                        {msg.sender} · {msg.channel}
                       </div>
 
-
-                      <div
-                        className="
-                          text-sm
-                          leading-6
-                        "
-                      >
+                      <div className="text-sm leading-6">
                         {msg.body}
                       </div>
 
-
                       <div
-                        className={`
-                          mt-1
-                          text-right
-                          text-[10px]
-
-                          ${
-                            msg.direction ===
-                            'outbound'
-                              ? 'text-white/55'
-                              : 'text-slate-400'
-                          }
-                        `}
+                        className={`mt-1 text-right text-[10px] ${
+                          msg.direction === 'outbound'
+                            ? 'text-white/55'
+                            : 'text-slate-400'
+                        }`}
                       >
                         {formatDateTime(
                           msg.timestamp
@@ -1060,7 +679,6 @@ export default async function LeadDetailPage({
                     </div>
 
                   </div>
-
                 )
               )}
 
@@ -1071,16 +689,11 @@ export default async function LeadDetailPage({
         </div>
 
 
-        {/* =================================================
+        {/* ===================================================
             RIGHT SIDEBAR
-        ================================================= */}
+        =================================================== */}
 
         <aside className="space-y-4">
-
-
-          {/* ===============================================
-              ACQUISITION PATH
-          =============================================== */}
 
           <div className="card-pad">
 
@@ -1092,41 +705,48 @@ export default async function LeadDetailPage({
               Acquisition path
             </div>
 
-
-            <div
-              className="
-                mt-5
-                space-y-4
-              "
-            >
-
-              <KeyValue
-                label="Lead created via"
-                value={leadOrigin}
-              />
-
+            <div className="mt-5 space-y-4">
 
               <KeyValue
                 label="First touch"
-                value={firstTouchLabel}
-                sub={firstTouchCampaign}
-              />
-
-
-              <KeyValue
-                label="Visitor location"
-                value={visitorLocation}
-              />
-
-
-              <KeyValue
-                label="Landing page"
                 value={
-                  enriched.landingPage ||
-                  '—'
+                  lead.firstTouchSource
+                }
+                sub={
+                  lead.firstTouchCampaign
                 }
               />
 
+              <KeyValue
+                label="First touch medium"
+                value={
+                  lead.firstTouchMedium
+                }
+              />
+
+              <KeyValue
+                label="Last touch"
+                value={
+                  lead.lastTouchSource
+                }
+                sub={
+                  lead.lastTouchCampaign
+                }
+              />
+
+              <KeyValue
+                label="Last touch medium"
+                value={
+                  lead.lastTouchMedium
+                }
+              />
+
+              <KeyValue
+                label="Lead created via"
+                value={
+                  lead.leadCreationChannel
+                }
+              />
 
               <KeyValue
                 label="Current channel"
@@ -1135,153 +755,10 @@ export default async function LeadDetailPage({
                 }
               />
 
-
-              <KeyValue
-                label="Last touch"
-                value={lastTouchLabel}
-                sub={
-                  enriched.lastTouchCampaign ||
-                  undefined
-                }
-              />
-
             </div>
 
           </div>
 
-
-          {/* ===============================================
-              WEBSITE ENGAGEMENT
-          =============================================== */}
-
-          <div className="card-pad">
-
-            <div className="eyebrow">
-              Engagement
-            </div>
-
-            <div className="section-title mt-1">
-              Website activity
-            </div>
-
-
-            <div
-              className="
-                mt-5
-                grid
-                grid-cols-2
-                gap-3
-              "
-            >
-
-              <Metric
-                label="Page views"
-                value={pageViews}
-              />
-
-
-              <Metric
-                label="WhatsApp clicks"
-                value={whatsappClicks}
-              />
-
-
-              <Metric
-                label="Form starts"
-                value={formStarts}
-              />
-
-
-              <Metric
-                label="Submissions"
-                value={formSubmissions}
-              />
-
-            </div>
-
-
-            {latestWhatsapp && (
-
-              <div
-                className="
-                  mt-4
-                  border-t
-                  border-slate-100
-                  pt-4
-                "
-              >
-
-                <div
-                  className="
-                    flex
-                    items-center
-                    gap-2
-                    text-xs
-                    font-semibold
-                    text-slate-400
-                  "
-                >
-                  <MousePointerClick
-                    size={14}
-                  />
-
-                  Latest WhatsApp interaction
-                </div>
-
-
-                <div
-                  className="
-                    mt-2
-                    text-sm
-                    font-bold
-                    text-slate-800
-                  "
-                >
-                  {formatSourceMedium(
-                    latestWhatsapp.source,
-                    latestWhatsapp.medium
-                  )}
-                </div>
-
-
-                {latestWhatsapp.detail && (
-
-                  <div
-                    className="
-                      mt-1
-                      text-xs
-                      leading-5
-                      text-slate-500
-                    "
-                  >
-                    {latestWhatsapp.detail}
-                  </div>
-
-                )}
-
-
-                <div
-                  className="
-                    mt-1
-                    text-xs
-                    text-slate-400
-                  "
-                >
-                  {formatDateTime(
-                    latestWhatsapp.timestamp
-                  )}
-                </div>
-
-              </div>
-
-            )}
-
-          </div>
-
-
-          {/* ===============================================
-              CONTACT
-          =============================================== */}
 
           <div className="card-pad">
 
@@ -1293,81 +770,32 @@ export default async function LeadDetailPage({
               Contact details
             </div>
 
+            <div className="mt-4 space-y-3 text-sm text-slate-600">
 
-            <div
-              className="
-                mt-4
-                space-y-3
-                text-sm
-                text-slate-600
-              "
-            >
-
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                "
-              >
+              <div className="flex items-center gap-2">
                 <Mail
                   size={15}
                   className="text-slate-400"
                 />
-
                 {lead.email ??
                   'Email not captured'}
               </div>
 
-
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                "
-              >
+              <div className="flex items-center gap-2">
                 <Phone
                   size={15}
                   className="text-slate-400"
                 />
-
                 {lead.phone ??
                   'Phone not captured'}
               </div>
 
-
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                "
-              >
-                <Globe2
-                  size={15}
-                  className="text-slate-400"
-                />
-
-                {lead.country ||
-                  'Country not captured'}
-              </div>
-
-
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                "
-              >
+              <div className="flex items-center gap-2">
                 <Clock3
                   size={15}
                   className="text-slate-400"
                 />
-
-                Last contact:
-                {' '}
+                Last contact:{' '}
                 {formatDateTime(
                   lead.lastContactedAt
                 )}
@@ -1377,10 +805,6 @@ export default async function LeadDetailPage({
 
           </div>
 
-
-          {/* ===============================================
-              LOG INTERACTION
-          =============================================== */}
 
           <div className="card-pad">
 
@@ -1392,37 +816,16 @@ export default async function LeadDetailPage({
               Log interaction
             </div>
 
-
-            <p
-              className="
-                mt-2
-                text-xs
-                leading-5
-                text-slate-400
-              "
-            >
-              Use this before Instagram/WhatsApp
-              APIs are connected. It writes a real
-              conversation + message to Supabase
-              and updates contact timestamps.
+            <p className="mt-2 text-xs leading-5 text-slate-400">
+              Use this before Instagram/WhatsApp APIs are connected. It writes a real conversation + message to Supabase and updates contact timestamps.
             </p>
-
 
             <form
               action={interactionAction}
-              className="
-                mt-4
-                space-y-3
-              "
+              className="mt-4 space-y-3"
             >
 
-              <div
-                className="
-                  grid
-                  grid-cols-2
-                  gap-2
-                "
-              >
+              <div className="grid grid-cols-2 gap-2">
 
                 <select
                   className="input"
@@ -1432,12 +835,10 @@ export default async function LeadDetailPage({
                   <option value="outbound">
                     Outbound
                   </option>
-
                   <option value="inbound">
                     Inbound
                   </option>
                 </select>
-
 
                 <select
                   className="input"
@@ -1447,50 +848,35 @@ export default async function LeadDetailPage({
                     'whatsapp'
                   }
                 >
-
                   {channels.map(
-                    ([value, label]) => (
-
+                    ([
+                      value,
+                      label,
+                    ]) => (
                       <option
                         key={value}
                         value={value}
                       >
                         {label}
                       </option>
-
                     )
                   )}
-
                 </select>
 
               </div>
 
-
               <textarea
-                className="
-                  input
-                  min-h-24
-                  resize-y
-                "
+                className="input min-h-24 resize-y"
                 name="body"
                 required
-                placeholder="
-                  Paste or type the interaction here…
-                "
+                placeholder="Paste or type the interaction here…"
               />
 
-
               <button
-                className="
-                  btn-secondary
-                  w-full
-                "
+                className="btn-secondary w-full"
                 type="submit"
               >
-                <MessageSquarePlus
-                  size={15}
-                />
-
+                <MessageSquarePlus size={15} />
                 Log interaction
               </button>
 
@@ -1498,10 +884,6 @@ export default async function LeadDetailPage({
 
           </div>
 
-
-          {/* ===============================================
-              STAGE
-          =============================================== */}
 
           <div className="card-pad">
 
@@ -1513,13 +895,9 @@ export default async function LeadDetailPage({
               Change stage
             </div>
 
-
             <form
               action={stageAction}
-              className="
-                mt-4
-                space-y-3
-              "
+              className="mt-4 space-y-3"
             >
 
               <select
@@ -1527,37 +905,29 @@ export default async function LeadDetailPage({
                 name="stage"
                 defaultValue={lead.stage}
               >
-
                 {stages.map(
-                  ([value, label]) => (
-
+                  ([
+                    value,
+                    label,
+                  ]) => (
                     <option
                       key={value}
                       value={value}
                     >
                       {label}
                     </option>
-
                   )
                 )}
-
               </select>
-
 
               <input
                 className="input"
                 name="reason"
-                placeholder="
-                  Reason / context (optional)
-                "
+                placeholder="Reason / context (optional)"
               />
 
-
               <button
-                className="
-                  btn-secondary
-                  w-full
-                "
+                className="btn-secondary w-full"
                 type="submit"
               >
                 Update stage
@@ -1567,10 +937,6 @@ export default async function LeadDetailPage({
 
           </div>
 
-
-          {/* ===============================================
-              FOLLOW-UP
-          =============================================== */}
 
           <div className="card-pad">
 
@@ -1582,24 +948,17 @@ export default async function LeadDetailPage({
               Schedule follow-up
             </div>
 
-
             <form
               action={followUpAction}
-              className="
-                mt-4
-                space-y-3
-              "
+              className="mt-4 space-y-3"
             >
 
               <input
                 className="input"
                 name="title"
                 required
-                placeholder="
-                  e.g. Check deposit payment
-                "
+                placeholder="e.g. Check deposit payment"
               />
-
 
               <input
                 className="input"
@@ -1608,131 +967,54 @@ export default async function LeadDetailPage({
                 required
               />
 
-
               <textarea
-                className="
-                  input
-                  min-h-20
-                  resize-y
-                "
+                className="input min-h-20 resize-y"
                 name="description"
                 placeholder="Optional note"
               />
 
-
               <button
-                className="
-                  btn-primary
-                  w-full
-                "
+                className="btn-primary w-full"
                 type="submit"
               >
-                <CalendarClock
-                  size={15}
-                />
-
+                <CalendarClock size={15} />
                 Create follow-up
               </button>
 
             </form>
 
-
             {lead.nextFollowupAt && (
-
-              <div
-                className="
-                  mt-3
-                  text-xs
-                  text-slate-400
-                "
-              >
-                Current next follow-up:
-                {' '}
+              <div className="mt-3 text-xs text-slate-400">
+                Current next follow-up:{' '}
                 {formatDateTime(
                   lead.nextFollowupAt
                 )}
               </div>
-
             )}
 
           </div>
 
 
-          {/* ===============================================
-              AGENT LAYER
-          =============================================== */}
+          <div className="rounded-2xl bg-brand p-5 text-white shadow-card">
 
-          <div
-            className="
-              rounded-2xl
-              bg-brand
-              p-5
-              text-white
-              shadow-card
-            "
-          >
-
-            <div
-              className="
-                text-xs
-                font-bold
-                uppercase
-                tracking-[.14em]
-                text-white/60
-              "
-            >
+            <div className="text-xs font-bold uppercase tracking-[.14em] text-white/60">
               Agent layer later
             </div>
 
-
-            <div
-              className="
-                mt-2
-                text-lg
-                font-bold
-              "
-            >
+            <div className="mt-2 text-lg font-bold">
               Human-controlled first
             </div>
 
-
-            <p
-              className="
-                mt-2
-                text-sm
-                leading-6
-                text-white/70
-              "
-            >
-              Claude will later recommend
-              the next action and draft
-              replies here, while these CRM
-              controls remain the source of
-              truth.
+            <p className="mt-2 text-sm leading-6 text-white/70">
+              Claude will later recommend the next action and draft replies here, while these CRM controls remain the source of truth.
             </p>
-
 
             <Link
               href="/follow-ups"
-              className="
-                mt-4
-                inline-flex
-                items-center
-                gap-2
-                rounded-xl
-                bg-white
-                px-3.5
-                py-2
-                text-sm
-                font-bold
-                text-brand
-              "
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-bold text-brand"
             >
               View task queue
-
-              <ExternalLink
-                size={14}
-              />
+              <ExternalLink size={14} />
             </Link>
 
           </div>
@@ -1740,25 +1022,17 @@ export default async function LeadDetailPage({
         </aside>
 
       </div>
-
     </>
   );
 }
 
-
-/* =========================================================
-   NOTICES
-========================================================= */
-
 function noticeText(
   notice: string
 ) {
-
   const messages: Record<
     string,
     string
   > = {
-
     updated:
       'Lead updated.',
 
@@ -1771,6 +1045,9 @@ function noticeText(
     'interaction-logged':
       'Interaction logged. Contact timestamps, conversation history and funnel assistance were updated.',
 
+    'payment-recorded':
+      'Payment recorded successfully.',
+
     'mock-update':
       'Mock mode: changes were not persisted.',
 
@@ -1782,19 +1059,16 @@ function noticeText(
 
     'mock-interaction':
       'Mock mode: interaction was not persisted.',
-  };
 
+    'mock-payment':
+      'Mock mode: payment was not persisted.',
+  };
 
   return (
     messages[notice] ??
     notice
   );
 }
-
-
-/* =========================================================
-   INFO CARD
-========================================================= */
 
 function Info({
   icon,
@@ -1805,53 +1079,39 @@ function Info({
   label: string;
   value: string;
 }) {
-
   return (
-
-    <div
-      className="
-        rounded-xl
-        bg-slate-50
-        p-4
-      "
-    >
-
-      <div
-        className="
-          flex
-          items-center
-          gap-2
-          text-xs
-          font-semibold
-          text-slate-400
-        "
-      >
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
         {icon}
         {label}
       </div>
 
-
-      <div
-        className="
-          mt-2
-          break-words
-          text-sm
-          font-bold
-          text-slate-800
-        "
-      >
-        {value || '—'}
+      <div className="mt-2 break-words text-sm font-bold text-slate-800">
+        {value}
       </div>
-
     </div>
-
   );
 }
 
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="text-xs font-semibold text-slate-400">
+        {label}
+      </div>
 
-/* =========================================================
-   KEY VALUE
-========================================================= */
+      <div className="mt-2 text-xl font-bold text-slate-800">
+        {value}
+      </div>
+    </div>
+  );
+}
 
 function KeyValue({
   label,
@@ -1859,164 +1119,71 @@ function KeyValue({
   sub,
 }: {
   label: string;
-  value?: string | null;
+  value?: string;
   sub?: string;
 }) {
-
   const renderedValue =
     value
-      ? value.replaceAll('_', ' ')
+      ? value.replaceAll(
+          '_',
+          ' '
+        )
       : '—';
 
-
   return (
-
     <div>
-
-      <div
-        className="
-          text-xs
-          font-semibold
-          text-slate-400
-        "
-      >
+      <div className="text-xs font-semibold text-slate-400">
         {label}
       </div>
 
-
-      <div
-        className="
-          mt-1
-          break-words
-          text-sm
-          font-bold
-          capitalize
-          text-slate-800
-        "
-      >
+      <div className="mt-1 text-sm font-bold capitalize text-slate-800">
         {renderedValue}
       </div>
 
-
       {sub && (
-
-        <div
-          className="
-            mt-0.5
-            break-words
-            text-xs
-            text-slate-500
-          "
-        >
+        <div className="mt-0.5 text-xs text-slate-500">
           {sub}
         </div>
-
       )}
-
     </div>
-
   );
 }
 
-
-/* =========================================================
-   METRIC CARD
-========================================================= */
-
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: number | string;
-}) {
-
-  return (
-
-    <div
-      className="
-        rounded-xl
-        bg-slate-50
-        p-3
-      "
-    >
-
-      <div
-        className="
-          text-xs
-          font-semibold
-          text-slate-400
-        "
-      >
-        {label}
-      </div>
-
-
-      <div
-        className="
-          mt-1
-          text-xl
-          font-bold
-          text-slate-800
-        "
-      >
-        {value}
-      </div>
-
-    </div>
-
-  );
-}
-
-
-/* =========================================================
-   SOURCE / MEDIUM
-========================================================= */
-
-function formatSourceMedium(
-  source?: string | null,
-  medium?: string | null
+function prettyOptional(
+  value?: string
 ) {
-
-  const values = [
-    source,
-    medium,
-  ]
-    .filter(Boolean)
-    .map(
-      (value) =>
-        String(value)
-          .replaceAll('_', ' ')
-    );
-
-
-  return values.length
-    ? values.join(' / ')
-    : '—';
-}
-
-
-/* =========================================================
-   TOUCHPOINT SEARCH TEXT
-========================================================= */
-
-function normalizePoint(
-  point: {
-    label?: string | null;
-    source?: string | null;
-    medium?: string | null;
-    detail?: string | null;
+  if (!value) {
+    return '—';
   }
-) {
 
-  return [
-    point.label,
-    point.source,
-    point.medium,
-    point.detail,
-  ]
-    .filter(Boolean)
-    .join(' ')
+  return value
     .replaceAll('_', ' ')
-    .toLowerCase();
+    .replace(
+      /\b\w/g,
+      (letter) =>
+        letter.toUpperCase()
+    );
+}
+
+function formatMoney(
+  value: number,
+  currency: string
+) {
+  const code =
+    currency.toUpperCase();
+
+  try {
+    return new Intl.NumberFormat(
+      code === 'INR'
+        ? 'en-IN'
+        : 'en-US',
+      {
+        style: 'currency',
+        currency: code,
+        maximumFractionDigits: 0,
+      }
+    ).format(value);
+  } catch {
+    return `${code} ${value}`;
+  }
 }

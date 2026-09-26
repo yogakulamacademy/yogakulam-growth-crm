@@ -6,24 +6,91 @@ import { createClient } from '@/lib/supabase/server';
 import { useMockData } from '@/lib/config';
 import type { Channel, IntentLevel, LeadStage } from '@/types/crm';
 
-const allowedStages: LeadStage[] = ['new','contacted','engaged','qualified','high_intent','payment_pending','enrolled','nurture','not_now','lost','unqualified','duplicate'];
-const allowedIntents: IntentLevel[] = ['unknown','low','medium','high','very_high'];
-const allowedChannels: Channel[] = ['website','instagram','whatsapp','email','phone','meta_lead_form','other'];
+const allowedStages: LeadStage[] = [
+  'new',
+  'contacted',
+  'engaged',
+  'qualified',
+  'high_intent',
+  'payment_pending',
+  'enrolled',
+  'nurture',
+  'not_now',
+  'lost',
+  'unqualified',
+  'duplicate',
+];
 
-function textValue(formData: FormData, key: string) {
-  const value = String(formData.get(key) ?? '').trim();
+const allowedIntents: IntentLevel[] = [
+  'unknown',
+  'low',
+  'medium',
+  'high',
+  'very_high',
+];
+
+const allowedChannels: Channel[] = [
+  'website',
+  'instagram',
+  'whatsapp',
+  'email',
+  'phone',
+  'meta_lead_form',
+  'other',
+];
+
+const allowedPaymentKinds = [
+  'deposit',
+  'balance',
+  'full',
+  'refund',
+  'other',
+] as const;
+
+type PaymentKind =
+  typeof allowedPaymentKinds[number];
+
+function textValue(
+  formData: FormData,
+  key: string
+) {
+  const value = String(
+    formData.get(key) ?? ''
+  ).trim();
+
   return value || null;
 }
-function monthDate(value: string | null) {
-  if (!value) return null;
-  return /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
-}
-function safeChannel(value: string | null): Channel {
-  return allowedChannels.includes(value as Channel) ? (value as Channel) : 'other';
+
+function monthDate(
+  value: string | null
+) {
+  if (!value) {
+    return null;
+  }
+
+  return /^\d{4}-\d{2}$/.test(value)
+    ? `${value}-01`
+    : value;
 }
 
-function numberValue(formData: FormData, key: string) {
-  const raw = textValue(formData, key);
+function safeChannel(
+  value: string | null
+): Channel {
+  return allowedChannels.includes(
+    value as Channel
+  )
+    ? value as Channel
+    : 'other';
+}
+
+function numberValue(
+  formData: FormData,
+  key: string
+) {
+  const raw = textValue(
+    formData,
+    key
+  );
 
   if (raw === null) {
     return null;
@@ -36,10 +103,14 @@ function numberValue(formData: FormData, key: string) {
     : null;
 }
 
-function currencyValue(formData: FormData) {
+function currencyValue(
+  formData: FormData
+) {
   const value = (
-    textValue(formData, 'potential_currency') ??
-    ''
+    textValue(
+      formData,
+      'potential_currency'
+    ) ?? ''
   ).toUpperCase();
 
   return ['USD', 'INR'].includes(value)
@@ -47,8 +118,9 @@ function currencyValue(formData: FormData) {
     : null;
 }
 
-
-export async function createLeadAction(formData: FormData) {
+export async function createLeadAction(
+  formData: FormData
+) {
   if (useMockData) {
     redirect('/leads?notice=mock-create');
   }
@@ -65,7 +137,6 @@ export async function createLeadAction(formData: FormData) {
     );
   }
 
-
   const potentialMode =
     textValue(
       formData,
@@ -74,23 +145,17 @@ export async function createLeadAction(formData: FormData) {
       ? 'manual'
       : 'batch_default';
 
-
   const manualPotentialValue =
     numberValue(
       formData,
       'potential_value'
     );
 
-
   const manualCurrency =
     currencyValue(
       formData
     );
 
-
-  /*
-   * Validate manual override.
-   */
   if (
     potentialMode === 'manual' &&
     (
@@ -98,49 +163,35 @@ export async function createLeadAction(formData: FormData) {
       manualPotentialValue < 0
     )
   ) {
-
     redirect(
       '/leads/new?error=' +
       encodeURIComponent(
         'Enter a valid potential value.'
       )
     );
-
   }
-
 
   if (
     potentialMode === 'manual' &&
     !manualCurrency
   ) {
-
     redirect(
       '/leads/new?error=' +
       encodeURIComponent(
         'Select INR or USD for the potential value.'
       )
     );
-
   }
-
 
   const supabase =
     await createClient();
 
-
-  /*
-   * Create the lead normally first.
-   *
-   * preferred_batch_id will activate the
-   * database trigger and set the batch value.
-   */
   const {
     data,
     error,
   } = await supabase.rpc(
     'create_crm_lead',
     {
-
       p_first_name:
         firstName,
 
@@ -245,46 +296,31 @@ export async function createLeadAction(formData: FormData) {
           formData,
           'notes'
         ),
-
     }
   );
 
-
   if (error) {
-
     redirect(
       `/leads/new?error=${encodeURIComponent(
         error.message
       )}`
     );
-
   }
-
 
   const id =
     Array.isArray(data)
       ? data[0]?.id
       : (data as any)?.id;
 
-
-  /*
-   * Manual override happens AFTER lead creation.
-   *
-   * That means the DB trigger can first apply
-   * the batch default, then we intentionally
-   * replace it with the admissions override.
-   */
   if (
     id &&
     potentialMode === 'manual'
   ) {
-
     const {
       error: valueError,
     } = await supabase
       .from('leads')
       .update({
-
         potential_value:
           manualPotentialValue,
 
@@ -293,39 +329,24 @@ export async function createLeadAction(formData: FormData) {
 
         potential_value_source:
           'manual',
-
       })
       .eq(
         'id',
         id
       );
 
-
     if (valueError) {
-
       redirect(
         `/leads/${id}/edit?error=${encodeURIComponent(
           valueError.message
         )}`
       );
-
     }
-
   }
 
-
-  revalidatePath(
-    '/leads'
-  );
-
-  revalidatePath(
-    '/dashboard'
-  );
-
-  revalidatePath(
-    '/revenue'
-  );
-
+  revalidatePath('/leads');
+  revalidatePath('/dashboard');
+  revalidatePath('/revenue');
 
   redirect(
     id
@@ -338,15 +359,11 @@ export async function updateLeadAction(
   leadId: string,
   formData: FormData
 ) {
-
   if (useMockData) {
-
     redirect(
       `/leads/${leadId}?notice=mock-update`
     );
-
   }
-
 
   const intentRaw =
     textValue(
@@ -354,16 +371,12 @@ export async function updateLeadAction(
       'intent'
     );
 
-
   const intent: IntentLevel =
     allowedIntents.includes(
       intentRaw as IntentLevel
     )
-      ? (
-          intentRaw as IntentLevel
-        )
+      ? intentRaw as IntentLevel
       : 'unknown';
-
 
   const channel =
     safeChannel(
@@ -373,13 +386,11 @@ export async function updateLeadAction(
       )
     );
 
-
   const firstName =
     textValue(
       formData,
       'first_name'
     );
-
 
   const lastName =
     textValue(
@@ -387,17 +398,12 @@ export async function updateLeadAction(
       'last_name'
     );
 
-
   const preferredBatchId =
     textValue(
       formData,
       'preferred_batch_id'
     );
 
-
-  /*
-   * Potential value control.
-   */
   const potentialMode =
     textValue(
       formData,
@@ -406,23 +412,17 @@ export async function updateLeadAction(
       ? 'manual'
       : 'batch_default';
 
-
   const manualPotentialValue =
     numberValue(
       formData,
       'potential_value'
     );
 
-
   const manualCurrency =
     currencyValue(
       formData
     );
 
-
-  /*
-   * Validate manual override.
-   */
   if (
     potentialMode === 'manual' &&
     (
@@ -430,56 +430,37 @@ export async function updateLeadAction(
       manualPotentialValue < 0
     )
   ) {
-
     redirect(
       `/leads/${leadId}/edit?error=${encodeURIComponent(
         'Enter a valid potential value.'
       )}`
     );
-
   }
-
 
   if (
     potentialMode === 'manual' &&
     !manualCurrency
   ) {
-
     redirect(
       `/leads/${leadId}/edit?error=${encodeURIComponent(
         'Select INR or USD for the potential value.'
       )}`
     );
-
   }
 
-
-  /*
-   * Decide which potential-value fields
-   * should be written.
-   */
   let potentialFields: {
     potential_value:
       number | null;
-
     potential_currency:
       string | null;
-
     potential_value_source:
       string | null;
   };
 
-
   if (
     potentialMode === 'manual'
   ) {
-
-    /*
-     * Protect this value from future
-     * batch-default updates.
-     */
     potentialFields = {
-
       potential_value:
         manualPotentialValue,
 
@@ -488,22 +469,11 @@ export async function updateLeadAction(
 
       potential_value_source:
         'manual',
-
     };
-
   } else if (
     preferredBatchId
   ) {
-
-    /*
-     * Clear the existing manual value.
-     *
-     * The BEFORE UPDATE trigger will detect
-     * batch_default and refill these values
-     * from course_batches.
-     */
     potentialFields = {
-
       potential_value:
         null,
 
@@ -512,16 +482,9 @@ export async function updateLeadAction(
 
       potential_value_source:
         'batch_default',
-
     };
-
   } else {
-
-    /*
-     * No batch and no manual value.
-     */
     potentialFields = {
-
       potential_value:
         null,
 
@@ -530,22 +493,17 @@ export async function updateLeadAction(
 
       potential_value_source:
         null,
-
     };
-
   }
-
 
   const supabase =
     await createClient();
-
 
   const {
     error,
   } = await supabase
     .from('leads')
     .update({
-
       first_name:
         firstName,
 
@@ -620,151 +578,618 @@ export async function updateLeadAction(
         ),
 
       ...potentialFields,
-
     })
     .eq(
       'id',
       leadId
     );
 
-
   if (error) {
-
     redirect(
       `/leads/${leadId}/edit?error=${encodeURIComponent(
         error.message
       )}`
     );
-
   }
-
 
   revalidatePath(
     `/leads/${leadId}`
   );
-
   revalidatePath(
     `/leads/${leadId}/edit`
   );
-
-  revalidatePath(
-    '/leads'
-  );
-
-  revalidatePath(
-    '/dashboard'
-  );
-
-  revalidatePath(
-    '/revenue'
-  );
-
+  revalidatePath('/leads');
+  revalidatePath('/dashboard');
+  revalidatePath('/revenue');
 
   redirect(
     `/leads/${leadId}?notice=updated`
   );
 }
 
-export async function updateLeadStageAction(leadId: string, formData: FormData) {
-  if (useMockData) redirect(`/leads/${leadId}?notice=mock-stage`);
-  const rawStage = textValue(formData, 'stage');
-  if (!allowedStages.includes(rawStage as LeadStage)) redirect(`/leads/${leadId}?error=Invalid%20stage`);
+export async function recordPaymentAction(
+  leadId: string,
+  formData: FormData
+) {
+  if (useMockData) {
+    redirect(
+      `/leads/${leadId}?notice=mock-payment`
+    );
+  }
 
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const { error } = await supabase.rpc('set_lead_stage', {
-    p_lead_id: leadId,
-    p_new_stage: rawStage,
-    p_changed_by_type: 'human',
-    p_changed_by_id: claims?.claims?.sub ?? null,
-    p_reason: textValue(formData, 'reason'),
-  });
-  if (error) redirect(`/leads/${leadId}?error=${encodeURIComponent(error.message)}`);
+  const kindRaw =
+    textValue(
+      formData,
+      'payment_kind'
+    );
 
-  revalidatePath(`/leads/${leadId}`);
+  const paymentKind: PaymentKind =
+    allowedPaymentKinds.includes(
+      kindRaw as PaymentKind
+    )
+      ? kindRaw as PaymentKind
+      : 'other';
+
+  const amount =
+    numberValue(
+      formData,
+      'payment_amount'
+    );
+
+  if (
+    amount === null ||
+    amount <= 0
+  ) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        'Enter a valid payment amount.'
+      )}`
+    );
+  }
+
+  const currency = (
+    textValue(
+      formData,
+      'payment_currency'
+    ) ?? ''
+  ).toUpperCase();
+
+  if (
+    ![
+      'USD',
+      'INR',
+    ].includes(currency)
+  ) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        'Select INR or USD.'
+      )}`
+    );
+  }
+
+  const provider =
+    textValue(
+      formData,
+      'payment_provider'
+    );
+
+  const reference =
+    textValue(
+      formData,
+      'payment_reference'
+    );
+
+  const notes =
+    textValue(
+      formData,
+      'payment_notes'
+    );
+
+  const paidAtRaw =
+    textValue(
+      formData,
+      'paid_at'
+    );
+
+  let paidAt =
+    new Date().toISOString();
+
+  if (paidAtRaw) {
+    const parsed =
+      new Date(paidAtRaw);
+
+    if (
+      Number.isNaN(
+        parsed.getTime()
+      )
+    ) {
+      redirect(
+        `/leads/${leadId}?error=${encodeURIComponent(
+          'Invalid payment date.'
+        )}`
+      );
+    }
+
+    paidAt =
+      parsed.toISOString();
+  }
+
+  const status =
+    paymentKind === 'refund'
+      ? 'refunded'
+      : 'paid';
+
+  const supabase =
+    await createClient();
+
+  const {
+    data: payment,
+    error,
+  } = await supabase
+    .from('payments')
+    .insert({
+      lead_id:
+        leadId,
+
+      payment_kind:
+        paymentKind,
+
+      status,
+
+      amount,
+
+      currency,
+
+      provider,
+
+      external_payment_id:
+        reference,
+
+      paid_at:
+        paidAt,
+
+      metadata: {
+        source:
+          'crm_manual',
+
+        notes,
+      },
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
+  await supabase
+    .from('activities')
+    .insert({
+      lead_id:
+        leadId,
+
+      activity_type:
+        paymentKind === 'refund'
+          ? 'refund_recorded'
+          : 'payment_recorded',
+
+      actor_type:
+        'human',
+
+      title:
+        paymentKind === 'refund'
+          ? 'Refund recorded'
+          : 'Payment recorded',
+
+      details:
+        `${currency} ${amount}` +
+        (
+          provider
+            ? ` · ${provider}`
+            : ''
+        ),
+
+      metadata: {
+        payment_id:
+          payment?.id,
+
+        payment_kind:
+          paymentKind,
+
+        currency,
+
+        amount,
+
+        reference,
+      },
+    });
+
+  revalidatePath(
+    `/leads/${leadId}`
+  );
+  revalidatePath('/leads');
+  revalidatePath('/dashboard');
+  revalidatePath('/revenue');
+
+  redirect(
+    `/leads/${leadId}?notice=payment-recorded`
+  );
+}
+
+export async function updateLeadStageAction(
+  leadId: string,
+  formData: FormData
+) {
+  if (useMockData) {
+    redirect(
+      `/leads/${leadId}?notice=mock-stage`
+    );
+  }
+
+  const rawStage =
+    textValue(
+      formData,
+      'stage'
+    );
+
+  if (
+    !allowedStages.includes(
+      rawStage as LeadStage
+    )
+  ) {
+    redirect(
+      `/leads/${leadId}?error=Invalid%20stage`
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    data: claims,
+  } = await supabase.auth.getClaims();
+
+  const {
+    error,
+  } = await supabase.rpc(
+    'set_lead_stage',
+    {
+      p_lead_id:
+        leadId,
+
+      p_new_stage:
+        rawStage,
+
+      p_changed_by_type:
+        'human',
+
+      p_changed_by_id:
+        claims?.claims?.sub ??
+        null,
+
+      p_reason:
+        textValue(
+          formData,
+          'reason'
+        ),
+    }
+  );
+
+  if (error) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
+  revalidatePath(
+    `/leads/${leadId}`
+  );
   revalidatePath('/leads');
   revalidatePath('/pipeline');
   revalidatePath('/dashboard');
-  redirect(`/leads/${leadId}?notice=stage-updated`);
+  revalidatePath('/revenue');
+
+  redirect(
+    `/leads/${leadId}?notice=stage-updated`
+  );
 }
 
-export async function createFollowUpAction(leadId: string, formData: FormData) {
-  if (useMockData) redirect(`/leads/${leadId}?notice=mock-followup`);
-  const title = textValue(formData, 'title');
-  const dueAt = textValue(formData, 'due_at');
-  if (!title || !dueAt) redirect(`/leads/${leadId}?error=Follow-up%20title%20and%20time%20are%20required`);
+export async function createFollowUpAction(
+  leadId: string,
+  formData: FormData
+) {
+  if (useMockData) {
+    redirect(
+      `/leads/${leadId}?notice=mock-followup`
+    );
+  }
 
-  const supabase = await createClient();
-  const { error } = await supabase.rpc('create_followup_task', {
-    p_lead_id: leadId,
-    p_title: title,
-    p_due_at: new Date(dueAt!).toISOString(),
-    p_description: textValue(formData, 'description'),
-  });
-  if (error) redirect(`/leads/${leadId}?error=${encodeURIComponent(error.message)}`);
+  const title =
+    textValue(
+      formData,
+      'title'
+    );
 
-  revalidatePath(`/leads/${leadId}`);
+  const dueAt =
+    textValue(
+      formData,
+      'due_at'
+    );
+
+  if (
+    !title ||
+    !dueAt
+  ) {
+    redirect(
+      `/leads/${leadId}?error=Follow-up%20title%20and%20time%20are%20required`
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    error,
+  } = await supabase.rpc(
+    'create_followup_task',
+    {
+      p_lead_id:
+        leadId,
+
+      p_title:
+        title,
+
+      p_due_at:
+        new Date(
+          dueAt!
+        ).toISOString(),
+
+      p_description:
+        textValue(
+          formData,
+          'description'
+        ),
+    }
+  );
+
+  if (error) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
+  revalidatePath(
+    `/leads/${leadId}`
+  );
   revalidatePath('/follow-ups');
   revalidatePath('/dashboard');
-  redirect(`/leads/${leadId}?notice=followup-created`);
+
+  redirect(
+    `/leads/${leadId}?notice=followup-created`
+  );
 }
 
-export async function completeFollowUpAction(formData: FormData) {
-  const taskId = textValue(formData, 'task_id');
-  const leadId = textValue(formData, 'lead_id');
-  if (!taskId) return;
-  if (useMockData) redirect('/follow-ups?notice=mock-complete');
+export async function completeFollowUpAction(
+  formData: FormData
+) {
+  const taskId =
+    textValue(
+      formData,
+      'task_id'
+    );
 
-  const supabase = await createClient();
-  const { error } = await supabase.rpc('complete_followup_task', { p_task_id: taskId });
-  if (error) redirect(`/follow-ups?error=${encodeURIComponent(error.message)}`);
+  const leadId =
+    textValue(
+      formData,
+      'lead_id'
+    );
+
+  if (!taskId) {
+    return;
+  }
+
+  if (useMockData) {
+    redirect(
+      '/follow-ups?notice=mock-complete'
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    error,
+  } = await supabase.rpc(
+    'complete_followup_task',
+    {
+      p_task_id:
+        taskId,
+    }
+  );
+
+  if (error) {
+    redirect(
+      `/follow-ups?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
   revalidatePath('/follow-ups');
   revalidatePath('/dashboard');
-  if (leadId) revalidatePath(`/leads/${leadId}`);
-  redirect('/follow-ups?notice=completed');
+
+  if (leadId) {
+    revalidatePath(
+      `/leads/${leadId}`
+    );
+  }
+
+  redirect(
+    '/follow-ups?notice=completed'
+  );
 }
 
-export async function logLeadInteractionAction(leadId: string, formData: FormData) {
-  if (useMockData) redirect(`/leads/${leadId}?notice=mock-interaction`);
+export async function logLeadInteractionAction(
+  leadId: string,
+  formData: FormData
+) {
+  if (useMockData) {
+    redirect(
+      `/leads/${leadId}?notice=mock-interaction`
+    );
+  }
 
-  const channel = safeChannel(textValue(formData, 'channel'));
-  const directionRaw = textValue(formData, 'direction');
-  const direction = directionRaw === 'inbound' ? 'inbound' : 'outbound';
-  const body = textValue(formData, 'body');
-  const conversationId = textValue(formData, 'conversation_id');
-  if (!body) redirect(`/leads/${leadId}?error=Interaction%20text%20is%20required`);
+  const channel =
+    safeChannel(
+      textValue(
+        formData,
+        'channel'
+      )
+    );
 
-  const supabase = await createClient();
-  const { error } = await supabase.rpc('log_lead_interaction', {
-    p_lead_id: leadId,
-    p_channel: channel,
-    p_direction: direction,
-    p_body: body,
-    p_conversation_id: conversationId,
-  });
+  const directionRaw =
+    textValue(
+      formData,
+      'direction'
+    );
 
-  if (error) redirect(`/leads/${leadId}?error=${encodeURIComponent(error.message)}`);
-  revalidatePath(`/leads/${leadId}`);
+  const direction =
+    directionRaw === 'inbound'
+      ? 'inbound'
+      : 'outbound';
+
+  const body =
+    textValue(
+      formData,
+      'body'
+    );
+
+  const conversationId =
+    textValue(
+      formData,
+      'conversation_id'
+    );
+
+  if (!body) {
+    redirect(
+      `/leads/${leadId}?error=Interaction%20text%20is%20required`
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    error,
+  } = await supabase.rpc(
+    'log_lead_interaction',
+    {
+      p_lead_id:
+        leadId,
+
+      p_channel:
+        channel,
+
+      p_direction:
+        direction,
+
+      p_body:
+        body,
+
+      p_conversation_id:
+        conversationId,
+    }
+  );
+
+  if (error) {
+    redirect(
+      `/leads/${leadId}?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
+  revalidatePath(
+    `/leads/${leadId}`
+  );
   revalidatePath('/leads');
   revalidatePath('/dashboard');
   revalidatePath('/pipeline');
   revalidatePath('/conversations');
-  redirect(`/leads/${leadId}?notice=interaction-logged`);
+
+  redirect(
+    `/leads/${leadId}?notice=interaction-logged`
+  );
 }
 
-export async function snoozeFollowUpAction(formData: FormData) {
-  const taskId = textValue(formData, 'task_id');
-  const dueAt = textValue(formData, 'due_at');
-  if (!taskId || !dueAt) redirect('/follow-ups?error=Task%20and%20new%20time%20are%20required');
-  if (useMockData) redirect('/follow-ups?notice=mock-snooze');
+export async function snoozeFollowUpAction(
+  formData: FormData
+) {
+  const taskId =
+    textValue(
+      formData,
+      'task_id'
+    );
 
-  const supabase = await createClient();
-  const { error } = await supabase.rpc('snooze_followup_task', {
-    p_task_id: taskId,
-    p_due_at: new Date(dueAt!).toISOString(),
-  });
-  if (error) redirect(`/follow-ups?error=${encodeURIComponent(error.message)}`);
+  const dueAt =
+    textValue(
+      formData,
+      'due_at'
+    );
+
+  if (
+    !taskId ||
+    !dueAt
+  ) {
+    redirect(
+      '/follow-ups?error=Task%20and%20new%20time%20are%20required'
+    );
+  }
+
+  if (useMockData) {
+    redirect(
+      '/follow-ups?notice=mock-snooze'
+    );
+  }
+
+  const supabase =
+    await createClient();
+
+  const {
+    error,
+  } = await supabase.rpc(
+    'snooze_followup_task',
+    {
+      p_task_id:
+        taskId,
+
+      p_due_at:
+        new Date(
+          dueAt
+        ).toISOString(),
+    }
+  );
+
+  if (error) {
+    redirect(
+      `/follow-ups?error=${encodeURIComponent(
+        error.message
+      )}`
+    );
+  }
+
   revalidatePath('/follow-ups');
   revalidatePath('/dashboard');
-  redirect('/follow-ups?notice=snoozed');
+
+  redirect(
+    '/follow-ups?notice=snoozed'
+  );
 }

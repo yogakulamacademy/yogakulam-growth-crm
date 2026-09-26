@@ -54,6 +54,29 @@ export type CourseBatchOption = {
 };
 
 
+export type LeadPayment = {
+  id: string;
+  paymentKind:
+    | 'deposit'
+    | 'balance'
+    | 'full'
+    | 'refund'
+    | 'other';
+  status:
+    | 'pending'
+    | 'paid'
+    | 'failed'
+    | 'refunded'
+    | 'partially_refunded';
+  amount: number;
+  currency: string;
+  provider?: string;
+  externalPaymentId?: string;
+  paidAt?: string;
+  createdAt: string;
+  notes?: string;
+};
+
 
 /*
  * Extended lead data used by the Lead Detail page.
@@ -287,7 +310,11 @@ Promise<LeadOverview[]> {
 
 export async function getLead(
   id: string
-): Promise<EnrichedLeadDetail | null> {
+):
+
+
+
+Promise<EnrichedLeadDetail | null> {
 
   if (useMockData) {
 
@@ -358,6 +385,7 @@ export async function getLead(
 
         potential_value,
         potential_currency,
+        potential_value_source,
 
         geo_country,
         geo_region,
@@ -964,6 +992,9 @@ export async function getLead(
    PERSON
 --------------------------------------------------------- */
 
+
+
+
 firstName:
   row.first_name ??
   undefined,
@@ -1188,6 +1219,109 @@ potentialValueSource:
 
   };
 
+}
+
+
+/* =========================================================
+   LEAD PAYMENTS
+========================================================= */
+
+export async function getLeadPayments(
+  leadId: string
+): Promise<LeadPayment[]> {
+
+  if (useMockData) {
+    return [];
+  }
+
+
+  const supabase =
+    await createClient();
+
+
+  const {
+    data,
+    error,
+  } = await supabase
+    .from('payments')
+    .select(`
+      id,
+      payment_kind,
+      status,
+      amount,
+      currency,
+      provider,
+      external_payment_id,
+      paid_at,
+      metadata,
+      created_at
+    `)
+    .eq(
+      'lead_id',
+      leadId
+    )
+    .order(
+      'created_at',
+      {
+        ascending: false,
+      }
+    );
+
+
+  if (error) {
+
+    throw new Error(
+      `Unable to load payments: ${error.message}`
+    );
+
+  }
+
+
+  return (
+    data ?? []
+  ).map(
+    (row: any) => ({
+
+      id:
+        row.id,
+
+      paymentKind:
+        row.payment_kind,
+
+      status:
+        row.status,
+
+      amount:
+        Number(
+          row.amount ?? 0
+        ),
+
+      currency:
+        String(
+          row.currency ?? ''
+        ).toUpperCase(),
+
+      provider:
+        row.provider ??
+        undefined,
+
+      externalPaymentId:
+        row.external_payment_id ??
+        undefined,
+
+      paidAt:
+        row.paid_at ??
+        undefined,
+
+      createdAt:
+        row.created_at,
+
+      notes:
+        row.metadata?.notes ??
+        undefined,
+
+    })
+  );
 }
 
 
