@@ -6,10 +6,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 // - tracking/collect: allowed Origin + payload validation
 // - tracking/identify: allowed Origin + TRACKING_INGEST_SECRET
 // - leads/capture: WEBSITE_LEAD_CAPTURE_SECRET
+// - analytics/ga4/sync: GA4_SYNC_SECRET
 const PUBLIC_EXACT_PATHS = new Set([
   '/login',
   '/yogakulam-tracker.js',
   '/api/leads/capture',
+  '/api/analytics/ga4/sync',
 ]);
 
 function isPublicPath(pathname: string) {
