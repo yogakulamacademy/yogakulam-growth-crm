@@ -19,6 +19,10 @@ import {
 import { PageHeader } from '@/components/ui';
 import { createClient } from '@/lib/supabase/server';
 
+import {
+  GoogleAdsBusinessPerformance,
+} from '@/components/google-ads-business-performance';
+
 
 type FunnelOverview = {
   visitors: number | string | null;
@@ -633,6 +637,9 @@ export default async function FunnelPage() {
           />
         </div>
       </section>
+
+
+      <GoogleAdsBusinessPerformance />
 
 
       <section
