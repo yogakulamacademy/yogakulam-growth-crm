@@ -281,6 +281,92 @@ async function querySearchAnalytics(
   return allRows;
 }
 
+type SearchAppearanceDailyRow = {
+  date: string;
+  row: GscApiRow;
+};
+
+function addUtcDays(
+  isoDateValue: string,
+  days: number
+) {
+  const date =
+    new Date(
+      `${isoDateValue}T00:00:00Z`
+    );
+
+  date.setUTCDate(
+    date.getUTCDate() +
+    days
+  );
+
+  return date
+    .toISOString()
+    .slice(
+      0,
+      10
+    );
+}
+
+async function fetchSearchAppearanceDaily(
+  accessToken: string,
+  siteUrl: string,
+  startDate: string,
+  endDate: string
+):
+Promise<SearchAppearanceDailyRow[]> {
+  const allRows:
+    SearchAppearanceDailyRow[] = [];
+
+  let currentDate =
+    startDate;
+
+  while (
+    currentDate <=
+    endDate
+  ) {
+    /*
+     * Search Console does not allow searchAppearance to be
+     * grouped together with another dimension such as date.
+     * Query one day at a time so the database can still retain
+     * a daily search-appearance breakdown.
+     */
+    const rows =
+      await querySearchAnalytics(
+        accessToken,
+        siteUrl,
+        {
+          startDate:
+            currentDate,
+          endDate:
+            currentDate,
+          dimensions: [
+            'searchAppearance',
+          ],
+        }
+      );
+
+    for (
+      const row of
+      rows
+    ) {
+      allRows.push({
+        date:
+          currentDate,
+        row,
+      });
+    }
+
+    currentDate =
+      addUtcDays(
+        currentDate,
+        1
+      );
+  }
+
+  return allRows;
+}
+
 async function clearRange(
   supabase: SupabaseClient,
   table: string,
@@ -517,17 +603,11 @@ Promise<GscSyncCounts> {
         }
       ),
 
-      querySearchAnalytics(
+      fetchSearchAppearanceDaily(
         accessToken,
         siteUrl,
-        {
-          startDate,
-          endDate,
-          dimensions: [
-            'date',
-            'searchAppearance',
-          ],
-        }
+        startDate,
+        endDate
       ),
     ]);
 
@@ -667,21 +747,19 @@ Promise<GscSyncCounts> {
 
   const searchAppearanceRows =
     appearanceApiRows.map(
-      (row) => ({
+      ({
+        date,
+        row,
+      }) => ({
         site_url:
           siteUrl,
-        date:
-          dimensionValue(
-            row,
-            0,
-            startDate
-          ),
+        date,
         search_type:
           SEARCH_TYPE,
         search_appearance:
           dimensionValue(
             row,
-            1,
+            0,
             '(not set)'
           ),
         ...baseMetrics(
