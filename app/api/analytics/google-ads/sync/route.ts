@@ -123,7 +123,7 @@ function validateRange(
 }
 
 
-function isAuthorized(
+function authState(
   request: NextRequest,
   allowCron = false
 ) {
@@ -151,32 +151,68 @@ function isAuthorized(
       )
       ?.trim();
 
-  if (
-    manualSecret &&
-    headerSecret ===
-      manualSecret
-  ) {
-    return true;
-  }
+  const manualHeaderMatch =
+    Boolean(
+      manualSecret &&
+      headerSecret &&
+      headerSecret ===
+        manualSecret
+    );
 
-  if (
-    manualSecret &&
-    authorization ===
-      `Bearer ${manualSecret}`
-  ) {
-    return true;
-  }
+  const manualBearerMatch =
+    Boolean(
+      manualSecret &&
+      authorization ===
+        `Bearer ${manualSecret}`
+    );
 
-  if (
-    allowCron &&
-    cronSecret &&
-    authorization ===
-      `Bearer ${cronSecret}`
-  ) {
-    return true;
-  }
+  const cronBearerMatch =
+    Boolean(
+      allowCron &&
+      cronSecret &&
+      authorization ===
+        `Bearer ${cronSecret}`
+    );
 
-  return false;
+  return {
+    authorized:
+      manualHeaderMatch ||
+      manualBearerMatch ||
+      cronBearerMatch,
+
+    diagnostics: {
+      manualSecretConfigured:
+        Boolean(
+          manualSecret
+        ),
+
+      manualSecretLength:
+        manualSecret
+          ?.length ??
+        0,
+
+      receivedHeader:
+        Boolean(
+          headerSecret
+        ),
+
+      receivedHeaderLength:
+        headerSecret
+          ?.length ??
+        0,
+
+      authorizationHeaderReceived:
+        Boolean(
+          authorization
+        ),
+
+      manualHeaderMatch,
+
+      manualBearerMatch,
+
+      cronBearerMatch,
+    },
+  };
 }
 
 
@@ -365,11 +401,15 @@ async function runSync({
 export async function POST(
   request: NextRequest
 ) {
-  if (
-    !isAuthorized(
+  const auth =
+    authState(
       request,
       true
-    )
+    );
+
+
+  if (
+    !auth.authorized
   ) {
     return NextResponse.json(
       {
@@ -378,6 +418,9 @@ export async function POST(
 
         error:
           'Unauthorized.',
+
+        authDiagnostics:
+          auth.diagnostics,
       },
       {
         status:
@@ -469,11 +512,15 @@ export async function POST(
 export async function GET(
   request: NextRequest
 ) {
-  if (
-    !isAuthorized(
+  const auth =
+    authState(
       request,
       true
-    )
+    );
+
+
+  if (
+    !auth.authorized
   ) {
     return NextResponse.json(
       {
@@ -482,6 +529,9 @@ export async function GET(
 
         error:
           'Unauthorized.',
+
+        authDiagnostics:
+          auth.diagnostics,
       },
       {
         status:
@@ -492,10 +542,6 @@ export async function GET(
 
 
   try {
-    /*
-     * Re-sync the latest seven completed days because Google Ads
-     * conversion attribution can update after the original click date.
-     */
     const endDate =
       isoDate(
         new Date(
