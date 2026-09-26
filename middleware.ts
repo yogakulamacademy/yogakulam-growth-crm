@@ -12,6 +12,7 @@ const PUBLIC_EXACT_PATHS =
     '/api/analytics/ga4/sync',
     '/api/analytics/gsc/sync',
     '/api/analytics/google-ads/sync',
+    '/api/analytics/meta-ads/sync',
   ]);
 
 
@@ -21,8 +22,12 @@ function isPublicPath(
   const normalizedPath =
     pathname.length > 1 &&
     pathname.endsWith('/')
-      ? pathname.slice(0, -1)
+      ? pathname.slice(
+          0,
+          -1
+        )
       : pathname;
+
 
   if (
     PUBLIC_EXACT_PATHS.has(
@@ -32,6 +37,7 @@ function isPublicPath(
     return true;
   }
 
+
   if (
     normalizedPath.startsWith(
       '/api/tracking/'
@@ -39,6 +45,7 @@ function isPublicPath(
   ) {
     return true;
   }
+
 
   return false;
 }
@@ -56,11 +63,6 @@ export async function middleware(
   }
 
 
-  /*
-   * Public browser/server integration routes must bypass
-   * CRM user authentication. Their own route-level controls
-   * remain responsible for authorization.
-   */
   if (
     isPublicPath(
       request.nextUrl.pathname
@@ -73,6 +75,7 @@ export async function middleware(
   const url =
     process.env
       .NEXT_PUBLIC_SUPABASE_URL;
+
 
   const key =
     process.env
@@ -124,10 +127,12 @@ export async function middleware(
                     )
               );
 
+
             response =
               NextResponse.next({
                 request,
               });
+
 
             cookiesToSet
               .forEach(
@@ -173,8 +178,10 @@ export async function middleware(
       request.nextUrl
         .clone();
 
+
     redirectUrl.pathname =
       '/login';
+
 
     redirectUrl
       .searchParams
@@ -182,6 +189,7 @@ export async function middleware(
         'next',
         request.nextUrl.pathname
       );
+
 
     return NextResponse.redirect(
       redirectUrl
@@ -197,11 +205,14 @@ export async function middleware(
       request.nextUrl
         .clone();
 
+
     redirectUrl.pathname =
       '/dashboard';
 
+
     redirectUrl.search =
       '';
+
 
     return NextResponse.redirect(
       redirectUrl
