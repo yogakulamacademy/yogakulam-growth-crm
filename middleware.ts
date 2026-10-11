@@ -22,6 +22,7 @@ const PUBLIC_EXACT_PATHS = new Set([
   "/api/admissions/auto-tasks",
   "/api/conversion-feedback/run",
   "/api/whatsapp/webhook",
+  "/api/instagram/webhook",
   "/api/sync/course-batches",
     "/api/tracking/collect",
   "/api/tracking/consent",
