@@ -308,7 +308,6 @@ export async function GET(
 
     const {
       appId,
-      configId,
     } =
       instagramLoginConfiguration();
 
@@ -416,7 +415,6 @@ export async function GET(
     const authorizationUrl =
       instagramAuthorizationUrl({
         appId,
-        configId,
         redirectUri,
         state,
       });

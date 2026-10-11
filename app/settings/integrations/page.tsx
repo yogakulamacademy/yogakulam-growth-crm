@@ -102,7 +102,7 @@ const PROVIDERS:
       title:
         'Instagram',
       description:
-        'Instagram Direct messaging through a professional account connected with Facebook Login for Business.',
+        'Instagram Direct messaging through a professional account connected securely with Instagram Login.',
       icon:
         <Instagram size={18} />,
       futureAction:

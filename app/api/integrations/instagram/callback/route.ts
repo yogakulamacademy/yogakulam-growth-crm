@@ -21,11 +21,10 @@ import {
 } from '@/lib/integrations/crypto';
 
 import {
-  exchangeMetaAuthorizationCode,
-  inspectMetaAccessToken,
-} from '@/lib/integrations/meta';
-
-import {
+  exchangeInstagramAuthorizationCode,
+  exchangeInstagramLongLivedToken,
+  getInstagramAccountProfile,
+  instagramOAuthScopes,
   instagramRedirectUri,
 } from '@/lib/integrations/instagram';
 
@@ -617,27 +616,22 @@ export async function GET(
       );
 
 
-    /*
-     * Instagram Facebook Login for Business uses the
-     * same Meta authorization-code token endpoint.
-     */
-    const token =
-      await exchangeMetaAuthorizationCode({
+    const shortLivedToken =
+      await exchangeInstagramAuthorizationCode({
         code,
         redirectUri,
       });
 
 
-    /*
-     * Validate the credential before storing it:
-     * - valid token
-     * - belongs to this Meta application
-     * - SYSTEM_USER credential
-     * - stable Meta system-user subject
-     */
-    const inspection =
-      await inspectMetaAccessToken(
-        token.accessToken,
+    const longLivedToken =
+      await exchangeInstagramLongLivedToken(
+        shortLivedToken.accessToken,
+      );
+
+
+    const profile =
+      await getInstagramAccountProfile(
+        longLivedToken.accessToken,
       );
 
 
@@ -664,7 +658,7 @@ export async function GET(
         )
         .eq(
           'external_account_id',
-          inspection.userId,
+          profile.userId,
         )
         .maybeSingle();
 
@@ -682,18 +676,28 @@ export async function GET(
         | null;
 
 
+    const nowMs =
+      Date.now();
+
+    const now =
+      new Date(
+        nowMs,
+      ).toISOString();
+
+
     const tokenExpiresAt =
-      inspection.expiresAt &&
-      inspection.expiresAt > 0
+      longLivedToken.expiresIn &&
+      longLivedToken.expiresIn > 0
         ? new Date(
-            inspection.expiresAt *
-              1000,
+            nowMs +
+              longLivedToken.expiresIn *
+                1000,
           ).toISOString()
         : null;
 
 
-    const now =
-      new Date().toISOString();
+    const scopes =
+      instagramOAuthScopes();
 
 
     const payload = {
@@ -704,7 +708,7 @@ export async function GET(
         'instagram',
 
       auth_mode:
-        'system_user',
+        'oauth_user',
 
       status:
         'connected',
@@ -713,29 +717,25 @@ export async function GET(
         null,
 
       /*
-       * This identifies the authenticated Meta
-       * system-user credential. The selected Instagram
-       * professional account will be stored separately
-       * during Instagram asset discovery.
+       * Instagram Professional Account ID.
+       *
+       * Use this identity for tenant routing and,
+       * later, webhook/account matching.
        */
       external_account_id:
-        inspection.userId,
+        profile.userId,
 
       account_name:
-        existing
-          ?.account_name
-          ?.trim() ||
-        'Instagram Business Integration',
+        profile.username,
 
       account_email:
         null,
 
-      scopes:
-        inspection.scopes,
+      scopes,
 
       access_token_ciphertext:
         encryptIntegrationSecret(
-          token.accessToken,
+          longLivedToken.accessToken,
         ),
 
       refresh_token_ciphertext:
@@ -745,29 +745,20 @@ export async function GET(
         tokenExpiresAt,
 
       token_type:
-        token.tokenType,
+        longLivedToken.tokenType,
 
       provider_metadata: {
         credential_source:
           'encrypted_connection',
 
         login_product:
-          'facebook_login_for_business',
+          'instagram_login',
 
-        token_subject_type:
-          inspection.type,
+        account_type:
+          profile.accountType,
 
-        application:
-          inspection.application,
-
-        issued_at:
-          inspection.issuedAt,
-
-        data_access_expires_at:
-          inspection.dataAccessExpiresAt,
-
-        granular_scopes:
-          inspection.granularScopes,
+        oauth_user_id:
+          shortLivedToken.userId,
       },
 
       connected_by:
@@ -792,11 +783,6 @@ export async function GET(
 
 
     if (existing) {
-      /*
-       * Compare-and-swap style reconnect protection:
-       * the connection must still belong to this tenant,
-       * provider and inspected system-user subject.
-       */
       const {
         data:
           updatedRows,
@@ -824,7 +810,7 @@ export async function GET(
           )
           .eq(
             'external_account_id',
-            inspection.userId,
+            profile.userId,
           )
           .select(
             'id',
@@ -928,13 +914,19 @@ export async function GET(
 
         detail: {
           auth_mode:
-            'system_user',
+            'oauth_user',
 
           granted_scopes:
-            inspection.scopes,
+            scopes,
 
-          token_subject_type:
-            inspection.type,
+          instagram_user_id:
+            profile.userId,
+
+          username:
+            profile.username,
+
+          account_type:
+            profile.accountType,
 
           token_expires:
             Boolean(
@@ -957,7 +949,7 @@ export async function GET(
           true,
 
         message:
-          'Instagram account connected successfully.',
+          `Instagram @${profile.username} connected successfully.`,
       },
     );
   } catch (error) {
